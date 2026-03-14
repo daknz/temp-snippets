@@ -1,0 +1,107 @@
+'# modConfig
+Option Explicit
+
+'# Configuration variables
+Public Const adoURL As String = "https://www.google.com/search?q="
+'Public Const adoURL As String = "https://base-url/_workitems/edit/"
+
+Public Function GetAdoColumnNamesToShow() As Variant
+  GetAdoColumnNamesToShow = Array("ID", "Title", "Type")
+End Function
+
+Sub frmActionsConfig()
+  '# Effectively extends the default options in frmActions, to add more temporary actions
+
+  frmActions.Height = 300   '# Update to cater for a longer list
+  frmActions.Label1.Height = frmActions.Height - 40
+  
+  frmActions.macrosDict.Add "a", Array("ADO export", "ADOExport", Null)
+  frmActions.macrosDict.Add "i", Array("create ID links", "CreateIdLinks", Null)
+  frmActions.macrosDict.Add "n", Array("Word_CommentsFormatExportStart", "Word_CommentsFormatExportStart", Null)
+  frmActions.macrosDict.Add "t1", Array("table sync 1 - all columns, change log", "goToPrompt_SyncTableData", 1)
+  frmActions.macrosDict.Add "t2", Array("table sync 2 - formula columns, no change log", "goToPrompt_SyncTableData", 2)
+  frmActions.macrosDict.Add "t3", Array("test msgbox", "tempTest", "t3")
+    
+End Sub
+
+Sub SyncTableDataConfig(oldSheet As Worksheet, syncOption As Long)
+  '# Enables setting the columns for SyncTableData separately as 'config' here before running it. Typically call from frmActionsConfig and `syncOption` gets passed in
+  ' ** NB: need to make the ID one its own procedure/parameter ... is too different, and could be used elsewhere
+  
+  Dim addIdLinksColumn As Boolean, formulaColumns As Variant, textColumns As Variant, comparisonColumn As String, createChangeLog As Boolean
+    
+  '# Set default values
+  addIdLinksColumn = False  '# True to add another ID column with hyperlinks in it
+  formulaColumns = Empty
+  textColumns = Empty
+  comparisonColumn = ""     '# Set for example to "ID" (will just show added/removed) or "Blah" (will also show what changed in column)
+  createChangeLog = False   '# True to update a separate tab with changes (must be set up)
+    
+  '# Depending on the syncOption passed in...
+  '# Define columns with formulas and with text. If there are none use e.g. `textColumns = Array()`, then exclude this scenario in other mod using: `If UBound(textColumns) <> -1 Then`
+  Select Case syncOption
+  
+    Case 1
+      addIdLinksColumn = True
+      formulaColumns = Array("Category", "Cat2")
+      textColumns = Array("Comments", "Type")
+      comparisonColumn = "Key Col"
+      createChangeLog = True
+    
+    Case 2
+      formulaColumns = Array("Category", "Cat2")
+'      comparisonColumn = "ID"
+    
+    Case Else
+      Debug.Print "SyncTableDataConfig: valid syncOption required to proceed"
+      Exit Sub
+      
+  End Select
+
+
+  '# Call the actual function to sync data
+  Call SyncTableData(oldSheet, addIdLinksColumn, formulaColumns, textColumns, comparisonColumn, createChangeLog)
+  
+
+End Sub
+
+
+Sub tempTest(tParam)
+MsgBox tParam
+End Sub
+
+'-----------------------------------------------------------------------------
+'## Macros with keyboard shortcuts
+'-----------------------------------------------------------------------------
+
+Sub configCurrentMacro()        'Ctrl + q
+  currentMacro
+End Sub
+
+Sub configFilterTableCommon()   'Ctrl + e
+  filterTableCommon
+End Sub
+
+Sub configGoToPrompt()          'Ctrl + g
+  goToPrompt
+End Sub
+
+Sub configHyperlinksFollow()          'Ctrl + Shift + K
+  HyperlinksFollow
+End Sub
+
+Sub configMacrosList()          'Ctrl + m
+  macrosList
+End Sub
+
+Sub configMagicMacro()          'Ctrl + j
+  magicMacro                                    '** MOVE MACRO HERE?
+End Sub
+
+Sub configTbCreate()           'Ctrl + t
+  TbCreate
+End Sub
+
+
+'filterTableclearFirst   ''Ctr1+Shift+E
+'goToPrompt2             ''Ctr1+Shift+G

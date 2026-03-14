@@ -1,0 +1,3613 @@
+'# modDK
+'# MODULE DECLARATIONS - available to all modules
+
+'Option Explicit    '# forces explicit declaration of all variables
+
+Public tb As ListObject, lcs As ListColumns, tbDict As Object
+Public tb_HeaderRow, tb_BodyFirstRow, tb_FirstCol, tb_LastRow, tb_LastCol, tb_ActiveCellColName
+Public lc_Current As ListColumn, lc_First As ListColumn, lc_ID As ListColumn
+Public listArray() As String   '# used in frmGoTo1, frmList
+Public previousWorkbook As Workbook, previousWorksheet As Worksheet, previousColumn As ListColumn   '# used in frmGoTo1
+Public sheetsArray() As Worksheet
+
+
+Enum filterType '# used in filterTable
+    Blanks
+    ContainsSingle
+    ContainsMultiple
+    EqualsSingle
+    EqualsMultiple
+    NonBlanks
+    NotContains
+End Enum
+
+Enum searchTypes
+    StartOfWord
+    AnyPartOfWord
+End Enum
+
+Sub currentMacro()
+''Ctrl+q
+
+frmGoTo1.Show
+
+'frmList.Show    ''NB: an error here will be something on the form Initialize event
+
+'nextVisibleCell
+'goToNextVisibleCellDownInColumn
+
+End Sub
+
+
+
+Sub macrosList()
+''Ctrl+m
+
+  With frmActions
+    
+    '---------------------------------------------------------------------------------------
+    '## Display the form
+    '---------------------------------------------------------------------------------------
+    .Show
+
+    '---------------------------------------------------------------------------------------
+    '## Run macro using the selected macro name/parameter when the form is closed
+    '---------------------------------------------------------------------------------------
+    
+    If .macroName = "" Then Exit Sub  '# I.e. if form was cancelled
+    
+    If IsNull(.macroParameter) Then
+      ' No parameter; call the macro without arguments
+      Application.Run .macroName
+    Else
+      ' Call the macro with a parameter
+      Application.Run .macroName, .macroParameter
+    End If
+  
+  End With
+  
+  '---------------------------------------------------------------------------------------
+  '## Remove the form from memory
+  '---------------------------------------------------------------------------------------
+  Unload frmActions
+
+End Sub
+
+Sub goToPrompt()
+
+  With frmSelect
+     
+    '---------------------------------------------------------------------------------------
+    '## Display the form
+    '---------------------------------------------------------------------------------------
+    Call .InitializeForm("Go To")
+    .Show
+    
+    
+    '---------------------------------------------------------------------------------------
+    '## Take action with selected item when the form is closed
+    '---------------------------------------------------------------------------------------
+    If .resultType = "Workbook" Then
+    
+      With .selectedItem
+'        Debug.Print "goToPrompt: .Name: "; .Name
+        Windows(.Name).Visible = True   '* not currently catering for hidden workbooks, but should deal with it when it does
+        .Activate
+      End With
+      
+    ElseIf .resultType = "Worksheet" Then
+    
+      With .selectedItem
+        .Visible = True
+        .Select
+      End With
+      
+    ElseIf .resultType = "Column" Then
+    
+      With .selectedItem
+        'Debug.Print "modDK > goToPrompt > [...?]: " & .Index
+        .Range.EntireColumn.Hidden = False
+        Cells(Selection.row, .Range.Column).Select
+        ActiveWindow.ScrollColumn = .Index
+      End With
+      
+    ElseIf .resultType = "Cell" Or .resultType = "ID" Then
+      If Not frmSelect.selectedCell Is Nothing Then         '* Currently can't happen as form won't hide in this scenario - see which is best approach
+        frmSelect.selectedCell.Select
+      End If
+    
+    Else
+          
+    End If
+
+  End With
+   
+  '---------------------------------------------------------------------------------------
+  '## Remove the form from memory
+  '---------------------------------------------------------------------------------------
+
+  Unload frmSelect
+  Set frmSelect = Nothing '(AI: Interacting with the form while it's being unloaded can cause unpredictable behavior. Ensure that all references to the form are cleared after Unload frmGoTo2)
+  
+End Sub
+
+Sub goToPrompt2()
+  '# Allows me to choose what uses Ctrl+Shift+G
+  
+'  insertFormula_XLOOKUP2
+  
+End Sub
+
+Sub goToPrompt_SyncTableData(syncOption As Long)
+  '# Example using frmSelect to select a worksheet, then use it to run SyncTableData (via SyncTableDataConfig) - will update a similar table in the active sheet
+  
+
+  With frmSelect
+    Call .InitializeForm("SyncTable: original sheet", "Worksheet") '>>
+    .Show
+    
+    '#Outcome after close form
+    If .resultType = "Worksheet" Then
+      Call SyncTableDataConfig(.selectedItem, syncOption) '>>
+    End If
+
+  End With
+  
+  Unload frmSelect
+  Set frmSelect = Nothing '(AI: Interacting with the form while it's being unloaded can cause unpredictable behavior. Ensure that all references to the form are cleared after Unload frmGoTo2)
+
+End Sub
+
+Sub goToPromptTestOLD()
+
+'* use enum for mode?
+'* move what can into frm code, even variable?
+
+'* NB: gtMode is Public in frmGoTo1, but still seem to need to call as 'frmGoTo1.gtMode', _
+    and will be cleared when unload form (which is good for now)
+    '** NB: think I need to bring it back into modDK so I can use gtSh etc here??
+    '* Ensure frmGoTo1 documentation clear on modDK stuff (just add small note at the top and point to more detail at bottom)
+
+frmGoTo1.gtMode = "sh"
+'frmGoTo1.Tag = "s"
+frmGoTo1.Show
+
+'# remaining code runs when form closed ...
+'* think about whether to use global variable (= public?) _
+    Could maybe use globals instead of the tag above too, allows multiple options for what to do (just need to clear them after?)
+gtMode = Null
+Debug.Print "End of gtPromptTest. gtMode: " & frmGoTo1.gtMode
+
+End Sub
+
+Sub dP(content)
+
+Debug.Print content
+
+End Sub
+
+Sub copySheet(Optional newWorkbook As Boolean)
+
+  '# Currently set up so if run with no param, will copy current sheet after itself.  If True passed in, will prompt for another workbook/sheet and MOVE it before there
+  '* Are other variations I could have, e.g. for now have commented out the "Copy to a new workbook" option
+
+  If newWorkbook <> True Then
+  
+    ''Copy after the current sheet, and just rename with '2' at the end not '(2)' which can affect TbSetup
+    ActiveSheet.Copy after:=Sheets(ActiveSheet.Index)
+'    ActiveSheet.Name = Replace(ActiveSheet.Name, "(2)", "2")
+
+  Else
+
+    '# Copy to a new workbook
+    'ActiveSheet.Copy
+    
+    Dim wkbk As Workbook, wksh As Worksheet
+  
+    '-------------------
+    '# Get the workbook
+    '-------------------
+    With frmSelect
+      Call .InitializeForm("Move Sheet: other workbook", "Workbook") '>>
+      .Show
+      
+      '#Outcome after close form
+      If .resultType = "Workbook" Then
+        Set wkbk = .selectedItem
+      Else
+        Debug.Print "copySheet: no valid workbook returned, no action taken"
+        GoTo CancelFlow
+      End If
+  
+    End With
+    
+    Unload frmSelect
+    Set frmSelect = Nothing
+  
+    
+    '-------------------
+    '# Get the worksheet
+    '-------------------
+    
+    Set sheetsCollection = GetSheets("visible", wkbk)
+  
+    ' Extract the results
+    sheetsArray = sheetsCollection("SheetsArray")
+    'Set parentWorkbook = sheetsCollection("ParentWorkbook")
+    
+    'Debug.Print "insertFormula_XLOOKUP2 > IsArrayPopulated(sheetsArray): "; IsArrayPopulated(sheetsArray)
+  
+    
+    With frmSelect
+    
+      'Debug.Print "parentWorkbook.Name: "; parentWorkbook.Name; " [insertFormula_XLOOKUP2]"
+  '    Call .InitializeForm("XLOOKUP: other worksheet", "Worksheet", sheetsArray, parentWorkbook) '>>
+      Call .InitializeForm("Move Sheet: other worksheet", "Worksheet", sheetsArray) '>>
+      .Show
+  
+      '#Outcome after close form
+      If .resultType = "Worksheet" Then
+        Set wksh = .selectedItem
+        'MsgBox "insertFormula_XLOOKUP2: " & vbCr & vbCr & _
+          "Workbook: " & wkbk.Name & vbCr _
+          & "Worksheet: " & wksh.Name & vbCr _
+          & "Worksheet parent: " & wksh.Parent.Name
+      Else
+        Debug.Print "copySheet: no valid worksheet returned, no action taken"
+        GoTo CancelFlow
+      End If
+    
+    End With
+    
+    Unload frmSelect
+    Set frmSelect = Nothing
+    
+    ActiveSheet.Move Before:=Workbooks(wkbk.Name).Sheets(wksh.Index)
+
+  End If
+
+  Exit Sub '----------------------------------------------
+CancelFlow:
+  Unload frmSelect
+  Set frmSelect = Nothing
+
+End Sub
+
+Sub deleteSheet()
+  
+  ActiveSheet.Delete
+  If ActiveSheet.Index <> Sheets.count And ActiveSheet.Index <> 1 Then
+    Sheets(ActiveSheet.Index - 1).Select  '# Trying for now so the previous sheet is selected rather than next
+  End If
+  
+End Sub
+
+Sub newSheet(Optional showSheetName As Boolean)
+
+Sheets.Add after:=ActiveSheet
+
+If showSheetName = True Then
+  renameSheet
+End If
+
+End Sub
+
+Sub renameSheet()
+
+sheetName = InputBox("", "Sheet name", ActiveSheet.Name)
+
+If sheetName <> "" Then
+    ActiveSheet.Name = sheetName
+End If
+
+End Sub
+
+Sub freezeCells()
+
+If ActiveCell.row = 1 And ActiveCell.Column = 1 Then
+    ''No split (so also no freeze)
+    
+    With ActiveWindow
+        .SplitColumn = 0
+        .SplitRow = 0
+    End With
+    
+Else
+    ''Split above and left of current cell then freeze
+    ActiveWindow.SplitColumn = ActiveCell.Column - 1
+    ActiveWindow.SplitRow = ActiveCell.row - 1
+    ActiveWindow.FreezePanes = True
+End If
+
+End Sub
+
+Sub insertFormula_MATCH()
+  
+  '# First checks if the current cell has a MATCH formula (assumes the final "0" parameter not added either i.e. to be quicker .. this will add it, which gives slightly different results, but what I want)
+      '# If so: adds "IF(ISERROR..." etc, i.e. so the result shows "No" for errors or blank
+  '# Otherwise adds a 'MATCH' formula (with ISERROR wrapper) that checks if ID in this table exists in another
+  '# Prompts for which sheet the other table is in first (only within the same spreadsheet)
+  '# Currently needs to use ID columns (based on lc_ID in TbSetup ... i.e. has a few options)
+  
+  Dim colNameThis, colNameOther, defaultIndex, shThis, shOthersCount, shIndex, shList, sh As Worksheet
+  
+  '# If the cell already has a MATCH formula, will expand the formula to add the 'wrapper' around it
+  If InStr(1, ActiveCell.Formula2R1C1, "MATCH", vbTextCompare) = 2 Then
+      
+      '# Adds a bit at the front and the end of the existing formula (first stripping the initial "=" and final ")"
+      ActiveCell.Formula2R1C1 = _
+          "=IF(ISERROR(" & _
+          Left(Right(ActiveCell.Formula2R1C1, Len(ActiveCell.Formula2R1C1) - 1), Len(ActiveCell.Formula2R1C1) - 2) & _
+          ", 0)), ""No"", """")"
+      
+      Exit Sub '--------------------
+      
+  End If
+  
+  
+  '# Capture this sheet so can return to it later, and define the ID column within it
+  Set shThis = ActiveSheet
+  TbSetup
+  colNameThis = lc_ID.Name
+
+
+  Set sheetsCollection = GetSheets("withTable")
+  ' Extract the results
+  sheetsArray = sheetsCollection("SheetsArray")
+
+  With frmSelect
+    Call .InitializeForm("MATCH: other sheet", "Worksheet", sheetsArray) '>>
+
+    .Show
+    .TextBox1.SetFocus ' Ensure focus
+  
+    
+    '#Outcome after close form
+    If .resultType = "Worksheet" Then
+          
+      '# Go to the selected sheet, define the ID column to look up
+      .selectedItem.Activate
+      TbSetup
+      colNameOther = lc_ID.Name
+      
+      '# Return to the original sheet
+      shThis.Activate
+      
+      '# Add a formula in this format (in this example it's looking up 'ID' in this table and 'ID (Link)' in the other _
+          =IF(ISERROR(MATCH([@ID], tblSheet2[ID (Link)], 0)), "No", "")
+      ActiveCell.FormulaR1C1 = _
+          "=IF(ISERROR(MATCH([@[" & colNameThis & "]]," & tb & "[" & colNameOther & "], 0)), ""No"", """")"
+    
+    End If
+
+  End With
+  
+  Unload frmSelect
+  Set frmSelect = Nothing '(AI: Interacting with the form while it's being unloaded can cause unpredictable behavior. Ensure that all references to the form are cleared after Unload frmGoTo2)
+
+
+End Sub
+
+
+Sub insertFormula_XLOOKUP(Optional ThisWorkbook As Boolean = True)
+  '# Basic example that assumes using 'ID' column in both.
+  '# By default it assumes this workbook.  If False is passed in then will prompt for the workbook. NB: for this workbook Excel will naturally strip it from the final formula.
+
+  Dim sheetsCollection As Collection, sheetsArray As Variant, parentWorkbook As Workbook
+  Dim columnsCollection As Collection, columnsArray As Variant, parentWorksheet As Worksheet
+  Dim headerCell As Range
+
+  On Error GoTo ErrorHandler
+
+  Dim wkbk As Workbook, wksh As Worksheet, lc As ListColumn
+  
+  
+  If ThisWorkbook = True Then
+    
+    Set wkbk = ActiveWorkbook
+  
+  Else
+    
+    '-------------------
+    '# Get the workbook
+    '-------------------
+    With frmSelect
+      Call .InitializeForm("XLOOKUP: other workbook", "Workbook") '>>
+      .Show
+      
+      '#Outcome after close form
+      If .resultType = "Workbook" Then
+        Set wkbk = .selectedItem
+      Else
+        Debug.Print "insertFormula_XLOOKUP: no valid workbook returned, no action taken"
+        GoTo CancelFlow
+      End If
+  
+    End With
+    
+    Unload frmSelect
+    Set frmSelect = Nothing
+  
+  End If
+  
+  
+  '-------------------
+  '# Get the worksheet
+  '-------------------
+  
+  Set sheetsCollection = GetSheets("withTable", wkbk)
+
+  ' Extract the results
+  sheetsArray = sheetsCollection("SheetsArray")
+  Set parentWorkbook = sheetsCollection("ParentWorkbook")
+  
+'  Debug.Print "insertFormula_XLOOKUP > IsArrayPopulated(sheetsArray): "; IsArrayPopulated(sheetsArray)
+
+  
+  With frmSelect
+  
+    Debug.Print "parentWorkbook.Name: "; parentWorkbook.Name; " [insertFormula_XLOOKUP2]"
+'    Call .InitializeForm("XLOOKUP: other worksheet", "Worksheet", sheetsArray, parentWorkbook) '>>
+    Call .InitializeForm("XLOOKUP: other worksheet", "Worksheet", sheetsArray) '>>
+    .Show
+
+    '#Outcome after close form
+    If .resultType = "Worksheet" Then
+      Set wksh = .selectedItem
+    Else
+      Debug.Print "insertFormula_XLOOKUP: no valid worksheet returned, no action taken"
+      GoTo CancelFlow
+    End If
+  
+  End With
+  
+  Unload frmSelect
+  Set frmSelect = Nothing
+  
+  
+  '-------------------
+  '# Get the table column
+  '-------------------
+  
+  Set columnsCollection = GetColumns("", wksh)
+  
+  ' Extract the results
+  columnsArray = columnsCollection("ColumnsArray")
+  Set parentWorksheet = columnsCollection("ParentWorksheet")
+'  Debug.Print "insertFormula_XLOOKUP > IsArrayPopulated(columnsArray): "; IsArrayPopulated(columnsArray)
+
+  
+  With frmSelect
+  
+    Debug.Print "parentWorksheet.Name: "; parentWorksheet.Name; " [insertFormula_XLOOKUP]"
+'    Call .InitializeForm("XLOOKUP: lookup column", "Column", columnsArray, parentWorksheet) '>>
+    Call .InitializeForm("XLOOKUP: lookup column", "Column", columnsArray) '>>
+    .Show
+
+    '#Outcome after close form
+    If .resultType = "Column" Then
+      Set lc = .selectedItem
+    Else
+      Debug.Print "insertFormula_XLOOKUP: no valid column returned, no action taken"
+      GoTo CancelFlow
+    End If
+  
+  End With
+  
+  Unload frmSelect
+  Set frmSelect = Nothing
+  
+  
+  '---------------------
+  'Enter XLOOKUP formula
+  '---------------------
+  
+'  ActiveCell.FormulaR1C1 = _
+    "=XLOOKUP([@ID],Book3!tblSheet3[ID],Book3!tblSheet3[Stuff],"""")"
+  
+  ActiveCell.FormulaR1C1 = _
+    "=XLOOKUP([@ID],'" & wkbk.Name & "'!" & wksh.ListObjects(1).Name & "[ID],'" & wkbk.Name & "'!" & wksh.ListObjects(1).Name & "[" & lc.Name & "],"""")"
+  
+  Set headerCell = Cells(ActiveSheet.ListObjects(1).HeaderRowRange.row, ActiveCell.Column)
+  If Left(headerCell.value, 6) = "Column" Then
+    headerCell.value = lc.Name
+  End If
+  
+  '-----------------------
+  Exit Sub  '# Other flows
+  '-----------------------
+    
+CancelFlow:
+
+  Unload frmSelect
+  Set frmSelect = Nothing
+  Exit Sub '----------------------------------------------
+  
+  
+ErrorHandler:
+  LogError Err.Number, Err.Description
+  If Err.Number <> 0 Then
+    ' Re-raise the error to show the built-in error dialog
+    Err.Raise Err.Number
+  End If
+
+End Sub
+
+Sub ExampleProcedure()
+    On Error GoTo ErrorHandler
+
+    ' Code that may cause an error
+    Dim x As Integer
+    x = 1 / 0 ' This will cause a division by zero error
+
+    Exit Sub
+
+ErrorHandler:
+    LogError Err.Number, Err.Description
+    If Err.Number <> 0 Then
+        Err.Raise Err.Number
+    End If
+End Sub
+
+Sub tempMultiArray()
+
+Dim myArr(2, 1) ''Actually 3 rows and 2 columns
+Dim myArr2
+
+myArr(0, 0) = "f"
+myArr(0, 1) = "freezeCells"
+
+For i = 0 To 2
+    For j = 0 To 1
+        Debug.Print "myArr"; i; j; myArr(i, j)
+    Next
+Next
+
+''Found this, but not sure outputting it doesn't work
+'myArr2 = [{1,"a";2,"b"}]
+'Debug.Print "myArr2"; myArr2(0, 0)
+
+End Sub
+
+Sub openListOptions(Optional ByRef firstLetter As String)
+'''Optionally takes a parameter of the letter pressed so the form can default to it when called from an OnKey
+
+'''Used when have Alt+Down shortcut and don't want to break the default behaviour on a table header row
+'If ActiveSheet.ListObjects.Count = 1 Then
+'
+'    If ActiveCell.Row = ActiveSheet.ListObjects(1).HeaderRowRange(1).Row Then
+'        Exit Sub
+'    End If
+'
+'End If
+
+''NB: an error on the 'Load' line indicates something wrong in UserForm_Initialize
+Load frmListOptions
+frmListOptions.Tag = firstLetter
+
+frmListOptions.Height = 320
+frmListOptions.Width = 455
+
+frmListOptions.Show
+
+End Sub
+
+Sub setupOnKey_listOptions()
+'''Triggers the listOptions popup from any letter or number
+'** Update to only do it in certain column(s) so it's not always triggered
+'https://bettersolutions.com/vba/strings-characters/ascii-characters.htm
+
+'arr = Array("a", "A", "b")  '''Old, keeping as handy way to define quick array
+
+activateShortcut = 0   '''1 to enable, 0 to disable
+
+For i = 48 To 122
+
+    If i <= 57 Or (i >= 65 And i <= 90) Or i >= 97 Then     '''0-9, A-Z, a-z
+        
+        Debug.Print Chr(i)
+        If activateShortcut = 1 Then
+            Application.OnKey Chr(i), "'openListOptions """ & Chr(i) & """'"    'set up so runs openListOptions and passes Item as a parameter
+        ElseIf activateShortcut = 0 Then
+            Application.OnKey Chr(i)                                            'reset
+        End If
+        
+    End If
+Next
+
+End Sub
+
+Sub setupOnKey_Example()
+'Run this to set up a shortcut or return it to the default
+
+'Application.OnKey "%+{DOWN}", "aa"   ''' sets up a procedure to call for Alt(%) Shift(+) DownArrow
+Application.OnKey "%+{DOWN}"         ''' clears back to default
+
+End Sub
+
+Sub setupOnKey_AltDown()
+
+Application.OnKey "%{DOWN}", "openListOptions"
+'Application.OnKey "%{DOWN}"
+
+End Sub
+
+
+Sub TbCreate()
+'Ctrl+t
+'# Creates a table, unless one already exists in which case will rename/reformat like a new table.  Runs TbSetup at the end.
+
+Dim tblName, freezeCols As Boolean, autoFitCols As Boolean
+
+'' -- Boolean options - not sure on preference yet ----
+autoFitCols = 1
+'' ----------------------------------------------------
+
+''Cell/sheet styling
+With Cells
+    .Font.Name = "Segoe UI"
+    .Font.Size = 10
+    .VerticalAlignment = xlTop
+End With
+ActiveWindow.DisplayGridlines = False
+
+
+'# Define the table name from the sheet name
+tblName = "tbl" & StripNonAlphanumeric(ActiveSheet.Name)
+
+
+'# If there is no table in the sheet, create one
+If ActiveSheet.ListObjects.count = 0 Then
+    ActiveSheet.ListObjects.Add(xlSrcRange, ActiveSheet.UsedRange, , xlYes).Name = tblName
+'# If there is a table in the sheet, refer to that for the rest
+ElseIf ActiveSheet.ListObjects.count = 1 Then
+    ActiveSheet.ListObjects(1).Name = tblName
+End If
+    
+
+With ActiveSheet.ListObjects(tblName)
+    .TableStyle = "TableStyleLight11"       ''9 = blue, 11 = gray (for gray: use also the section below to make header black)
+    .ShowTableStyleColumnStripes = True
+End With
+
+''Black header (use with TableStyleLight11 above which has grey border but also grey shading
+With Range(tblName & "[#Headers]").Interior
+    .Pattern = xlSolid
+    .PatternColorIndex = xlAutomatic
+    .ThemeColor = xlThemeColorLight1
+End With
+
+
+Cells(1, ActiveCell.Column).Select          ' to ensure frozen top row is in the correct place, and retain the column selection for column freezing
+
+With ActiveWindow
+    .SplitColumn = 0
+    .SplitRow = 1
+End With
+ActiveWindow.FreezePanes = True
+
+If autoFitCols = True Then
+    Cells.EntireColumn.autoFit
+End If
+
+TbSetup
+
+End Sub
+Sub TbFilterClear()
+  '# Clear filter on tb if it's currently filtered
+  
+  If tb.AutoFilter.FilterMode Then tb.AutoFilter.ShowAllData
+
+End Sub
+
+
+Sub TbSetup()
+  
+  Dim lc As ListColumn
+  
+  'If Not Intersect(ActiveCell, ActiveSheet.ListObjects(1).Range) Is Nothing Then     '' prob not useful, only noting as another way to check current cell in a table
+  'If Not Intersect(ActiveCell, [Table1]) Is Nothing Then                              '' same as above, except only refers to DataBodyRange rather than Range so doesn't include header
+  
+  If ActiveSheet.ListObjects.count = 1 Then           '' if there is only one table in the sheet, use it
+      Set tb = ActiveSheet.ListObjects(1)
+      
+  ElseIf Not ActiveCell.ListObject Is Nothing Then    '' if the current cell is in a table, use it
+      Set tb = ActiveCell.ListObject
+      
+  Else                                                ''error message, stop
+    Debug.Print "TbSetup needs either a single table, or the active cell to be in a table"
+    End
+    
+  End If
+   
+  '# Set lcs as an object with the table list columns
+   Set lcs = tb.ListColumns
+   
+  '' Use my module level variables to make various attributes of the table available to other procedures
+      '' (NB: they persist, so care with using them again without calling TbSetup first)
+  
+  tb_HeaderRow = Range(tb & "[#Headers]").Rows(1).row                 '' first (header) row number
+  tb_BodyFirstRow = Range(tb).Rows(1).row '                           '' first (databody) row number
+  tb_LastRow = Range(tb).Rows(Range(tb).Rows.count).row               '' last row number
+  tb_FirstCol = Range(tb).Columns(1).Column                           '' first column number
+  tb_LastCol = Range(tb).Columns(Range(tb).Columns.count).Column      '' last column number
+  tb_ActiveCellColName = Cells(tb_HeaderRow, ActiveCell.Column).value '' table column name for the current cell
+  
+  If tb_ActiveCellColName <> "" Then
+      Set lc_Current = tb.ListColumns(tb_ActiveCellColName)             '' current column (reference to the actual list column). Use 'Set' to assign an object ref to this variable (i.e. I think a column is an object)
+  End If
+  
+  Set lc_First = tb.ListColumns(1)
+  
+  '# By default set lc_ID to the first column. _
+      If can find "ID (Link)" - use that and jump to end of this section.  Otherwise repeat with "ID" if not. Otherwise keep default (first column)
+  
+  Set lc_ID = lc_First
+  For Each lc In tb.ListColumns
+      If lc.Name = "ID (Link)" Then
+          Set lc_ID = lc
+          GoTo idDefined
+          Exit For
+      End If
+  Next
+  If lc_ID = lc_First Then
+      For Each lc In tb.ListColumns
+          If lc.Name = "ID" Then
+              Set lc_ID = lc
+              GoTo idDefined
+              Exit For
+          End If
+      Next
+  End If
+  
+idDefined:
+
+  
+  Set tbDict = CreateObject("Scripting.Dictionary") ' Initialize the dictionary
+  
+  For Each lc In tb.ListColumns
+      tbDict.Add lc.Name, lc
+  Next lc
+
+
+'Debug.Print tb_HeaderRow, tb_BodyFirstRow, tb_LastRow, tb_FirstCol, tb_LastCol, tb_ActiveCellColName
+ 
+''Example usage------------------
+'Range(tb & "[[Date Time]:[Column2]]").Value = tblData
+'Range("tblDailySummaryUsers[[#All],[Username]:[PrimarySmtp]]").Select
+'tb.ListColumns("ComputerName").Range.Column  'NB: the actual column. e.g. if the table starts in column B, and this is column D, will be 4
+'tb.ListColumns("ComputerName").Index   'NB: relative to table, e.g. if the table starts in column B, and this is column D, will be 3
+ 
+End Sub
+
+Sub TbSort(col1 As String, Optional order1 As XlSortOrder = xlAscending, Optional col2 As String = "", Optional order2 As XlSortOrder = xlAscending)
+
+  '# Most simple option - pass in name of column to sort ascending.  Can optionally change sort order, and add a secondary sort column
+  
+  With tb.Sort
+    .SortFields.Clear
+
+    '# Add first sort key
+    .SortFields.Add2 key:=Range(tb.Name & "[" & col1 & "]"), _
+                     SortOn:=xlSortOnValues, _
+                     Order:=order1, _
+                     DataOption:=xlSortNormal
+
+    '# Optionally add second sort key
+    If Len(col2) > 0 Then
+      .SortFields.Add2 key:=Range(tb.Name & "[" & col2 & "]"), _
+                       SortOn:=xlSortOnValues, _
+                       Order:=order2, _
+                       DataOption:=xlSortNormal
+    End If
+
+    '# General sort options
+    .Header = xlYes
+    .MatchCase = False
+    .Orientation = xlTopToBottom
+    .SortMethod = xlPinYin
+    .Apply
+  End With
+
+End Sub
+
+Sub filterTableclearFirst()
+''Ctr1+Shift+E
+
+If ActiveSheet.FilterMode Then ActiveSheet.ShowAllData
+
+filterTableCommon
+
+End Sub
+
+Sub filterTableCommon()
+''Ctr1+E (normally this is for Flash Fill)
+''Mostly calls filterTable to do the actual filter
+
+Dim filterValue
+
+TbSetup
+
+''Choose from filter options
+filterValue = InputBox _
+("Filter on:" & vbCr & vbCr & _
+"-" & vbTab & " match selected cell" & vbCr & _
+"*" & vbTab & ": contains selected cell" & vbCr & _
+"space " & vbTab & ": blank " & vbCr & _
+"<>" & vbTab & ": non blank" & vbCr & _
+"<>na" & vbTab & ": non blank or NA" & vbCr & _
+"t/f" & vbTab & ": true/false" & vbCr & vbCr & _
+"-" & vbTab & ": remove filter from current column only " & vbCr & _
+"`" & vbTab & ": first column contains whatever follows " & vbCr & vbCr & _
+"NB: enter + in front to add to existing filter", _
+"Filter", "*")
+
+
+''If nothing selected (cancel)
+If filterValue = "" Then
+    Exit Sub
+End If
+
+
+''If '-' was entered, remove any filtering on this column only
+If filterValue = "-" Then
+    tb.Range.AutoFilter field:=lc_Current.Index
+    Exit Sub
+End If
+
+
+'''If it has '+' at the start, add to existing filters, otherwise clear filters first
+'If Left(filterValue, 1) = "+" Then
+'    filterValue = Right(filterValue, Len(filterValue) - 1)
+'Else
+'    If ActiveSheet.FilterMode Then ActiveSheet.ShowAllData
+'End If
+
+
+''Do something depending on the option entered
+If filterValue = "=" Then
+    Call filterTable(tb, lc_Current, EqualsSingle, ActiveCell.Text)   '.Text here (i.e. what can see on screen) so works with formatted dates
+    
+ElseIf filterValue = "t" Then
+    Call filterTable(tb, lc_Current, EqualsSingle, "TRUE")
+
+ElseIf filterValue = "f" Then
+    Call filterTable(tb, lc_Current, EqualsSingle, "FALSE")
+
+ElseIf filterValue = "*" Then
+    Call filterTable(tb, lc_Current, ContainsSingle, ActiveCell.value)
+
+ElseIf filterValue = " " Then
+    Call filterTable(tb, lc_Current, Blanks)
+
+ElseIf filterValue = "<>" Then
+    Call filterTable(tb, lc_Current, NonBlanks)
+
+'' -- less used ones ----
+
+ElseIf filterValue = "<>na" Then
+    tb.Range.AutoFilter field:=ActiveCell.Column, Criteria1:="<>", Operator:=xlAnd, Criteria2:="<>#N/A"
+    'Call filterTable(tb, lc_Current, EqualsMultiple, Array("<", "<#N/A"))              '' Doesn't work Not sure there will be a way, haven't looked hard
+
+ElseIf Left(filterValue, 1) = "`" Then
+    Call filterTable(tb, tb.ListColumns(1), ContainsSingle, Right(filterValue, Len(filterValue) - 1))
+
+'' -- if none of above, just filter on contains what was entered ----
+
+Else
+    Call filterTable(tb, lc_Current, ContainsSingle, filterValue)
+
+    End If
+
+
+End Sub
+
+Private Sub filterTable(tb, lc, fType As filterType, Optional fText As Variant, Optional combineFilters As Boolean)
+'' Call from another procedure .. filterColumn` often calls this, and see bottom of this procedure for other examples
+''NB: can't remember plan for combineFilters parameter - either mult columns or mult criteria within a column? Hadn't done
+''Uses Enum filterType in module declarations
+
+'Debug.Print "filterTable: ", "lc=" & lc, "fType=" & fType 'NB: fType show a number for the Enum (first is 0)
+
+Select Case fType
+    Case filterType.Blanks
+        tb.Range.AutoFilter field:=lc.Index, Criteria1:=""
+
+    Case filterType.NonBlanks
+        tb.Range.AutoFilter field:=lc.Index, Criteria1:="<>"
+    
+    Case filterType.EqualsSingle
+        tb.Range.AutoFilter field:=lc.Index, Criteria1:=fText
+    
+    Case filterType.EqualsMultiple 'Eg. filter where value equals "aa" OR "bb" (use array - see examples at the bottom)
+        tb.Range.AutoFilter field:=lc.Index, Criteria1:=fText, Operator:=xlFilterValues  'Seems to need 'xlFilterValues' to work
+    
+    Case filterType.ContainsSingle
+        tb.Range.AutoFilter field:=lc.Index, Criteria1:="*" & fText & "*"
+    
+    Case filterType.ContainsMultiple
+        Debug.Print "Not sure how to to yet, other than 'manually' with value 1 or value 2 (i.e. can't do more like EqualsMultiple"
+        'tb.Range.AutoFilter Field:=lc.Index, Criteria1:="-*" & fText & "*", Operator:=xlFilterValues    'Tried same style as EqualsMultiple
+        'tb.Range.AutoFilter Field:=lc.Index, Criteria1:="=*b1*", Operator:=xIOr, Criteria2:="=*b2*"         'Recorded
+        'tb.Range.AutoFilter Field:=lc.Index, Criterial:="=b1", Operator:=xIOr, Criteria2:="=b2"            'Recorded "equals 'b1' or 'b2'", which comes out in a different style to what I landed on for EqualsMultiple so not helping
+    
+    Case filterType.NotContains
+        tb.Range.AutoFilter field:=lc.Index, Criteria1:="<>*" & fText & "*"
+    
+    Case Else
+        Debug.Print "Unknown"
+End Select
+
+''Scroll to the top (doesn't change the currently selected cell)
+ActiveWindow.ScrollRow = tb_HeaderRow
+
+
+''Example usage in calling procedure -----------------------------------------------
+
+'TbSetup
+
+''Then choose one...
+
+'Call filterTable(tb, tb.ListColumns("CoIA"), NonBlanks)
+'Call filterTable(tb, lc_Current, Blanks)               'NB: I define lc_Current as the current list column in TbSetup, but if want to define another column need to remember to use 'Set' since it's an object
+'Call filterTable(tb, lc_Exclude, EqualsSingle, "abc")
+'Call filterTable(tb, tb.ListColumns("Status"), NotContains, "Closed")
+'Call filterTable(tb, lc_Exclude, EqualsMultiple, Array("aaa", "bbb", "cc"))
+
+'-----------------------------------------------------------------------------------
+
+End Sub
+
+Function TbCol(colName As String) As ListColumn
+
+  '# Returns the ListColumn object from the current table (tb)
+  
+  Dim matchResult As Variant
+  
+  matchResult = Application.Match(colName, tb.HeaderRowRange, 0)
+
+  If IsNumeric(matchResult) Then
+    Set TbCol = tb.ListColumns(CLng(matchResult))
+  Else
+    Set TbCol = Nothing
+  End If
+
+End Function
+
+Function TbCellRng(rowOrIndex As Variant, colName As String) As Range
+  '# Returns a Range for the named column. rowOrIndex can be 0 (for the header), a row number, or a ListRow object
+
+  Dim targetCol As ListColumn
+  
+  Set targetCol = tb.ListColumns(colName)
+  
+  If IsObject(rowOrIndex) Then
+    '# ListRow passed
+    Set TbCellRng = rowOrIndex.Range(targetCol.Index)
+
+  ElseIf IsNumeric(rowOrIndex) Then
+    Dim i As Long
+    i = CLng(rowOrIndex)
+
+    If i = 0 Then
+      '# Header cell
+      Set TbCellRng = targetCol.Range.Cells(1)
+    Else
+  
+      If i < 1 Or i > tb.ListRows.count Then
+        Err.Raise vbObjectError + 514, , "TbCellRng error: row index (" & i & ") cannot exceed table row count (" & tb.ListRows.count & ")."
+      End If
+  
+      Set TbCellRng = tb.ListRows(i).Range(targetCol.Index)
+    End If
+  Else
+    Err.Raise vbObjectError + 513, , "TbCellRng error: invalid rowOrIndex input."
+  End If
+  
+  '# EXAMPLE USAGE -------------------------
+  
+'  Set c = TbCellRng(0, "Comment")               '# Header
+'  Set c = TbCellRng(3, "Comment")               '# Row index 3
+'  Set c = TbCellRng(tb.ListRows(3), "Comment")  '# Row object
+
+End Function
+
+Function TbCellVal(rowOrIndex As Variant, colName As String) As Variant
+  '# Returns the .Value of the cell in the given column and row
+  
+'  Debug.Print "TEMP TbCellVal rowOrIndex: "; TypeName(rowOrIndex)
+  
+  TbCellVal = TbCellRng(rowOrIndex, colName).value
+  
+  '# EXAMPLE USAGE -------------------------
+  
+'  Debug.Print TbCellVal(3, "Comment")
+
+End Function
+
+'Function TbCellText(rowOrIndex As Variant, colName As String) As String
+'  '# Returns the .Text of the cell (formatted/displayed version).   [NOT SURE ABOUT USING - SEEMS LESS RELIABLE]
+'
+'  TbCellText = TbCellRng(rowOrIndex, colName).Text
+'
+'End Function
+
+
+
+Sub tempClearBorders()
+    Range("tblSheet7").Select
+    Selection.Borders(xlDiagonalDown).LineStyle = xlNone
+    Selection.Borders(xlDiagonalUp).LineStyle = xlNone
+    Selection.Borders(xlEdgeLeft).LineStyle = xlNone
+    Selection.Borders(xlEdgeTop).LineStyle = xlNone
+    Selection.Borders(xlEdgeBottom).LineStyle = xlNone
+    Selection.Borders(xlEdgeRight).LineStyle = xlNone
+    Selection.Borders(xlInsideVertical).LineStyle = xlNone
+    Selection.Borders(xlInsideHorizontal).LineStyle = xlNone
+End Sub
+
+Sub testLrSetBorder()
+
+  Dim lr As ListRow
+  
+  TbSetup
+  
+  For Each lr In tb.ListRows
+      
+    If TbCellVal(lr, "cc") = "xyz" Then
+      LrSetBorder lr, xlEdgeTop, xlMedium, rgbRed
+    Else
+      LrSetBorder lr, xlEdgeTop, xlThin, rgbGrey
+    End If
+    
+  Next
+  
+End Sub
+
+Sub LrSetBorder(target As Variant, Optional bType As XlBordersIndex = -1, Optional bWeight As XlBorderWeight = xlThin, _
+    Optional bColour As XlRgbColor = rgbBlack, Optional clearBorders As Boolean = True)
+    
+  '#If no bType passed in, will just clear borders for the range
+  '# NB: at this stage it's easier to run multiple times if changing other borders.
+
+  Dim rng As Range
+
+  '# If a range was passed in, uses that.  If not, assumes it's something like a lr where it can simply make that `lr.Range`
+  If TypeOf target Is Range Then
+    Set rng = target
+  Else
+    Set rng = target.Range
+  End If
+
+
+  '# Optionally clear all borders on the range
+  If clearBorders Then
+    Dim b As XlBordersIndex
+    For b = xlEdgeLeft To xlInsideHorizontal  '# NB: excludes diagonals but that's fine
+      With rng.Borders(b)
+        .LineStyle = xlLineStyleNone
+      End With
+    Next b
+  End If
+
+  '# If a specific border is provided, apply it
+  If bType >= xlEdgeLeft And bType <= xlInsideHorizontal Then
+    With rng.Borders(bType)
+      .LineStyle = xlContinuous
+      .Color = bColour
+      .Weight = bWeight
+    End With
+  End If
+  
+  Exit Sub '# EXAMPLE USAGE: ----------------------------------
+
+  Dim lr As ListRow
+  
+  TbSetup
+  
+  For Each lr In tb.ListRows
+      
+    If TbCellVal(lr, "cc") = "xyz" Then
+      LrSetBorder lr, xlEdgeTop, xlMedium, rgbRed
+    End If
+    
+  Next
+
+End Sub
+
+Function LcCreate(Optional lcName As String = "", Optional lcFirst As Boolean = False, Optional lcContent As String = "", _
+  Optional formulaToText As Boolean = False, Optional autoFit As Boolean = False) As ListColumn
+  
+  '# Create a new ListColumn, with various options, and return it.
+  
+  Dim lc As ListColumn
+  
+  If lcFirst = True Then
+    Set lc = tb.ListColumns.Add(1)  '# Add at start
+  Else
+    Set lc = tb.ListColumns.Add     '# Add at end
+  End If
+  
+  lc.Name = lcName
+  lc.Range.Cells(1).Formula2R1C1 = lcName '# Manages name auto-increment if already exists (rather than setting via lc.Name which doesn't)
+  lc.DataBodyRange.Formula2R1C1 = lcContent
+  
+  If formulaToText = True Then
+    lc.DataBodyRange.value = lc.DataBodyRange.value
+  End If
+  
+  If autoFit = True Then
+    lc.Range.EntireColumn.autoFit
+  End If
+  
+  Set LcCreate = lc
+  
+  Exit Function '# EXAMPLE USAGE: --------------
+  '# Dim only commented here as it duplicates above.  When using example, enable it.  Couple of variations below - first better if then want to do anything with new lc
+  'Dim lc As ListColumn
+  TbSetup
+  Set lc = LcCreate("Blah", , , , True)
+  LcCreate "Blah2", , , , True
+End Function
+
+Sub ddgfgdfgfd()
+  Dim lc As ListColumn
+  TbSetup
+  Set lc = LcCreate("tt", , , , True)
+End Sub
+
+Sub LcUpdateHeaderIfExists(colName As String, newValue As String)
+
+  '# Updates the value/name of a ListColumn header if it exists.
+  
+  Dim lc As ListColumn
+  
+  Set lc = TbGetListColumn(colName)
+  If Not lc Is Nothing Then lc.Range.Cells(1) = newValue
+
+  '# Can optionally use this for checking if it doesn't exist, otherwise just does nothing
+  'If lc Is Nothing Then Debug.Print "[LcUpdateHeaderIfExists]: Column doesn't exist, so wasn't renamed: " & colName
+  
+  Exit Sub '# EXAMPLE USAGE: --------------
+  LcUpdateHeaderIfExists "aa", "AAA"
+
+End Sub
+
+Sub TempExample()
+
+  TbSetup
+  LcUpdateHeaderIfExists "YAY2", "YAY2"
+  
+End Sub
+
+Sub CreateIdLinks()
+  '# In active sheet's table: use the ID column to create a new ID column with hyperlinks (i.e. to ADO).  Original ID column will automatically be renamed to ID2.
+
+  Call TbSetup '>>
+
+  If tbDict.Exists("ID2") Then
+    Debug.Print "CreateIdLinks: 'ID2' column already exists, no new 'ID' column created"
+  Else
+
+    Set lcColumnName = tb.ListColumns.Add(1)
+    lcColumnName.Range.Cells(1).Formula2R1C1 = "ID" '# I.e. name the new column 'ID', which will auto-change the old one to 'ID2' (NB: have to use `.Range.Cells(1).Formula2R1C` here rather than `.Name` for this to work)
+      '* Need to manage better to handle if the 'ID2' column already exists (i.e. implies this has been done)
+    lcColumnName.DataBodyRange.Formula2R1C1 = _
+      "=HYPERLINK(""" & adoURL & """ & [@ID2], [@ID2])"
+    tb.ListColumns("ID2").Range.EntireColumn.Hidden = True
+    
+  End If
+
+End Sub
+
+Sub SyncTableData(oldSheet As Worksheet, addIdLinksColumn As Boolean, formulaColumns As Variant, _
+      textColumns As Variant, comparisonColumn As String, createChangeLog As Boolean)
+  '# Call from SyncTableDataConfig (which will set columns that need to be in the other sheet)
+  '# formulaColumns: array of strings with column names that have formulas. textColumns: same for columns with plain text.
+  
+  '* ToDo: more explanation. E.g. adds new columns , how ID works, ...
+  '* ToDo: feels like newDict can be rationalised into a single one?
+  
+  Dim oldTable As ListObject, newTable As ListObject
+  Dim oldDict As Object, newDict As Object
+  Dim rowIndex As Long
+  Dim arrData() As Variant
+  Dim key As String
+  Dim columnName As Variant, lcColumnName As ListColumn
+  Dim lcID As ListColumn, lcText As ListColumn
+  Dim tblChgLog As ListObject, lrLogEntry As ListRow
+  
+  
+  '# Initialize dictionary (key/value pairs - in this case the value will be an array [*CHECK: still the case?])
+  Set oldDict = CreateObject("Scripting.Dictionary")
+  
+  '# Reference the old and new tables
+  Set oldTable = oldSheet.ListObjects(1)
+  Set newTable = ActiveSheet.ListObjects(1)
+  
+  ' Create a dictionary to store existing column names
+  Set newDict = CreateObject("Scripting.Dictionary")
+  
+  '# Populate the dictionary with existing column names.  Used later to check if a column exists already before adding it
+  Dim col As ListColumn
+  
+  For Each col In oldTable.ListColumns
+      oldDict.Add col.Name, col
+  Next col
+  
+  For Each col In newTable.ListColumns
+      newDict.Add col.Name, col
+  Next col
+  
+  '# Set lcID for use later
+  Set lcID = newTable.ListColumns("ID")
+  
+  
+  '--------------------------------------------------------------------------------------------------------
+  '## STEP 1 Create ID column with hyperlinks
+  '--------------------------------------------------------------------------------------------------------
+
+  If addIdLinksColumn = True Then
+    Call CreateIdLinks '>>
+  End If
+
+  
+  '--------------------------------------------------------------------------------------------------------
+  '## STEP 2: Update the new table, using (step 1a) the formulaColumns passed in and (step 1b) textColumns
+  '--------------------------------------------------------------------------------------------------------
+
+  '--------------------------------------------------------------------------------------------------------
+  '## STEP 2A Formula columns
+  '--------------------------------------------------------------------------------------------------------
+  
+  '# Check there are values in the array before doing anything
+  If Not IsEmpty(formulaColumns) Then
+    For Each columnName In formulaColumns
+        
+      'Debug.Print "SyncTableData > columnName: " & columnName
+        
+      Set lcColumnName = Nothing
+                          
+      '# If the column exists already, use it, otherwise add it and use the new one (also add it to the scripting dictionary)
+      If newDict.Exists(columnName) Then
+        Set lcColumnName = newDict(columnName)
+      Else
+        Set lcColumnName = newTable.ListColumns.Add
+        lcColumnName.Name = columnName
+        newDict.Add lcColumnName.Name, lcColumnName
+      End If
+              
+      '# If the column exists in the old table, set the same formula (otherwise do nothing but note in console)
+      If oldDict.Exists(columnName) Then
+        lcColumnName.DataBodyRange.Formula2R1C1 = _
+          oldTable.ListColumns(columnName).DataBodyRange.Formula2R1C1
+      Else
+        Debug.Print "SyncTableData: column doesn't exist in old table - " & columnName
+      End If
+      
+      lcColumnName.Range(1).Interior.Color = RGB(21, 96, 130)
+      lcColumnName.Range.EntireColumn.autoFit
+      
+    Next columnName
+  
+  End If
+
+
+  '--------------------------------------------------------------------------------------------------------
+  '## STEP 2B Text columns (uses same concept as formula columns, but replaces with values at the end)
+  '--------------------------------------------------------------------------------------------------------
+  
+  '# Check there are values in the array before doing anything
+  If Not IsEmpty(textColumns) Then
+  
+    For Each columnName In textColumns
+    
+      'Debug.Print "SyncTableData > columnName: " & columnName
+        
+      Set lcColumnName = Nothing
+                
+      '# If the column exists already, use it, otherwise add it and use the new one (also add it to the scripting dictionary)
+      If newDict.Exists(columnName) Then
+        Set lcColumnName = newDict(columnName)
+      Else
+        Set lcColumnName = newTable.ListColumns.Add
+        lcColumnName.Name = columnName
+        newDict.Add lcColumnName.Name, lcColumnName
+      End If
+            
+            
+      '# If the column exists in the old table: add formula to look up the same ID and column name to find the previous value in the old table (or otherwise blank)
+      If oldDict.Exists(columnName) Then
+        lcColumnName.DataBodyRange.Formula2R1C1 = _
+          "=LET(PrevVal,XLOOKUP([@ID]," & oldTable.Name & "[ID]," & oldTable.Name & "[" & columnName & "],"""")," & Chr(10) & "IF(PrevVal="""","""",PrevVal)" & Chr(10) & ")"
+      Else
+        Debug.Print "SyncTableData: column doesn't exist in old table - " & columnName
+      End If
+      
+      '# Replace formulas with values, and format
+      lcColumnName.DataBodyRange.value = lcColumnName.DataBodyRange.value
+      lcColumnName.Range(1).Interior.Color = RGB(21, 96, 130)
+      lcColumnName.Range.EntireColumn.autoFit
+      
+    Next columnName
+
+  End If
+  
+  
+  If comparisonColumn <> "" Then
+
+  '--------------------------------------------------------------------------------------------------------
+    '## STEP 3: Add "Added" and "Removed" formulas
+  '--------------------------------------------------------------------------------------------------------
+    Dim lcChangeStatusNew As ListColumn, lcChangeStatusOld As ListColumn
+    
+    ' Add "ChangeStatus" column to the new table
+    Set lcChangeStatusNew = newTable.ListColumns.Add
+    lcChangeStatusNew.Name = "ChangeStatus"
+    '# Add a formula that checks if the ID existed in the old table (will show "Added" if not), or if the comparisonColumn from modConfig has changed (will show old and new vals)
+    lcChangeStatusNew.DataBodyRange.Formula2R1C1 = _
+      "=LET(oldVal,XLOOKUP([@ID]," & oldTable.Name & "[ID]," & oldTable.Name & "[" & comparisonColumn & "],""NotFound"")," & Chr(10) & "  IF([@[" & comparisonColumn & "]]=oldVal,""""," & Chr(10) & "  IF(oldVal=""NotFound"",""Added""," & Chr(10) & "  ""Release: "" & oldVal & "" > "" & [@[" & comparisonColumn & "]]))" & Chr(10) & ")"
+        
+          '# NB: ends up like this (where "Key Col" is the name of a column where I'm checking if the value has changed:
+            '=LET(oldVal,XLOOKUP([@ID],tblOld3[ID],tblOld3[Key Col],"NotFound"),
+            '  IF([@[Key Col]]=oldVal,"",
+            '  IF(oldVal="NotFound","Added",
+            '  "Release: " & oldVal & " > " & [@[Key Col]]))
+            ')
+          
+      
+  '    "=IF(ISERROR(MATCH([@" & lcID.Name & "]," & oldTable.Name & "[ID],0)),""Added"","""")"
+    lcChangeStatusNew.DataBodyRange.value = lcChangeStatusNew.DataBodyRange.value
+    lcChangeStatusNew.Range(1).Interior.Color = RGB(21, 96, 130)
+    lcChangeStatusNew.Range.EntireColumn.autoFit
+    
+    '# If a comparisonColumn string was passed in...
+    If createChangeLog = True Then
+      '# Add "Added" rows from newTable to change log
+      Call UpdateChangeLog(newTable)
+    End If
+  
+    '# Add "ChangeStatus" column to the old table
+    If oldDict.Exists("ChangeStatus") Then
+      Set lcChangeStatusOld = oldTable.ListColumns("ChangeStatus")
+    Else
+      Set lcChangeStatusOld = oldTable.ListColumns.Add
+      lcChangeStatusOld.Name = "ChangeStatus"
+      oldDict.Add lcChangeStatusOld.Name, lcChangeStatusOld
+    End If
+    
+    lcChangeStatusOld.DataBodyRange.Formula2R1C1 = _
+      "=IF(ISERROR(MATCH([@ID]," & newTable.Name & "[" & lcID.Name & "],0)),""Removed"","""")"
+    
+    lcChangeStatusOld.DataBodyRange.value = lcChangeStatusOld.DataBodyRange.value
+    lcChangeStatusOld.Range(1).Interior.Color = RGB(21, 96, 130)
+    lcChangeStatusOld.Range.EntireColumn.autoFit
+    
+    If createChangeLog = True Then
+      Set tblChgLog = Sheets("Change Log").ListObjects(1)
+      ' Add "Removed" rows from oldTable to change log
+      Call UpdateChangeLog(oldTable)
+    End If
+  
+  End If
+
+  ' Clean up
+  Set oldDict = Nothing
+  Set newDict = Nothing
+  
+End Sub
+
+Sub SyncTableDataOLD(oldSheet As Worksheet, newSheet As Worksheet, formulaColumns As Variant, textColumns As Variant, includeChangeLog As Boolean)
+  '* KEEPING for now for the oldDict, Step1, old Step2b - some useful code
+  '# formulaColumns: array of strings with column names that have formulas. textColumns: same for columns with plain text.
+  '# ToDo: more explanation. E.g. adds new columns , how ID works, ...
+  
+  
+  Dim oldTable As ListObject, newTable As ListObject
+  Dim oldDict As Object, newDict As Object
+  Dim rowIndex As Long
+  Dim arrData() As Variant
+  Dim key As String
+  Dim columnName As Variant, lcColumnName As ListColumn
+  Dim lcID As ListColumn, lcText As ListColumn
+  
+  Dim tblChgLog As ListObject, lrLogEntry As ListRow
+  Set tblChgLog = Sheets("Change Log").ListObjects(1)
+  
+  ' Initialize dictionary (key/value pairs - in this case the value will be an array)
+  Set oldDict = CreateObject("Scripting.Dictionary")
+  
+  ' Reference the old and new tables
+  Set oldTable = oldSheet.ListObjects(1)
+  Set newTable = newSheet.ListObjects(1)
+  
+  ' Step 1: Populate the dictionary from the old table
+  
+'  Set lcID = oldTable.ListColumns("ID")
+'
+'  For rowIndex = 1 To oldTable.ListRows.count
+'
+'    key = lcID.DataBodyRange.Cells(rowIndex, 1).Value
+'    '# Set the size of arrData to the same as the array of text columns passed in as a parameter
+'    ReDim arrData(LBound(textColumns) To UBound(textColumns))
+'
+'    ' Store text column values in the dictionary (value will be an array with the value in the relevant row's cell for each text column)
+'    For Each columnName In textColumns
+'      '# Set the value in that position in the array (e.g. arrData(0)) to be the relevant cell value from the old table
+'      arrData(Application.Match(columnName, textColumns, 0) - 1) = oldTable.ListColumns(columnName).DataBodyRange.Cells(rowIndex, 1).Value
+'    Next columnName
+'
+''    Debug.Print "arrData: " & Join(arrData, ", ")
+'    oldDict.Add key, arrData
+'
+'  Next rowIndex
+  
+  ' Step 2: Update the new table
+
+  Set lcID = newTable.ListColumns("ID")
+
+  '# 2a Formula columns
+  For Each columnName In formulaColumns
+  
+    'Debug.Print "SyncTableData > columnName: " & columnName
+      
+    Set lcColumnName = Nothing
+    
+    If columnName = lcID.Name Then
+      
+      Set lcColumnName = newTable.ListColumns.Add(1)
+      lcColumnName.Range.Cells(1).Formula2R1C1 = columnName
+      lcColumnName.DataBodyRange.Formula2R1C1 = _
+        "=HYPERLINK(""" & adoURL & """ & [@" & lcID.Name & "], [@" & lcID.Name & "])"
+      newTable.ListColumns("ID2").Range.EntireColumn.Hidden = True  'May be better to combine with my other "columns to display" concept instead at some point
+          
+    Else
+      
+'      * Replaced with code under it.  Remove if working ok
+'      On Error Resume Next
+'      Set lcColumnName = newTable.ListColumns(columnName)   ' ** won't work if using Tools > Options > Break on All Errors
+'      On Error GoTo 0
+'      If lcColumnName Is Nothing Then
+'        Set lcColumnName = newTable.ListColumns.Add
+'        lcColumnName.Name = columnName
+'      End If
+
+      ' Create a dictionary to store existing column names
+      Set newDict = CreateObject("Scripting.Dictionary")
+      
+      ' Populate the dictionary with existing column names
+      Dim col As ListColumn
+      For Each col In newTable.ListColumns
+          newDict.Add col.Name, col
+      Next col
+      
+      ' If the column exists already, use it, otherwise add it and use the new one (also add it to the scripting dictionary)
+      If newDict.Exists(columnName) Then
+        Set lcColumnName = newDict(columnName)
+      Else
+        Set lcColumnName = newTable.ListColumns.Add
+        lcColumnName.Name = columnName
+        newDict.Add lcColumnName.Name, lcColumnName
+      End If
+      
+      
+      lcColumnName.DataBodyRange.Formula2R1C1 = _
+        oldTable.ListColumns(columnName).DataBodyRange.Formula2R1C1
+    
+    End If
+    
+    lcColumnName.Range(1).Interior.Color = RGB(21, 96, 130)
+    lcColumnName.Range.EntireColumn.autoFit
+    
+  Next columnName
+    
+
+'  '# 2b Text columns (replaced with 'formula' version below as was too slow, but keeping for future reference for how it was done)
+''  Set lcID = newTable.ListColumns("ID")
+'
+'  For rowIndex = 1 To newTable.ListRows.count
+'    key = lcID.DataBodyRange.Cells(rowIndex, 1).Value
+'
+'    ' Restore data from the dictionary
+'    If oldDict.exists(key) Then
+'      arrData = oldDict(key)
+'      For Each columnName In textColumns
+'
+'        Set lcColumnName = Nothing
+'
+'        On Error Resume Next
+'        Set lcColumnName = newTable.ListColumns(columnName)   ' ** won't work if using Tools > Options > Break on All Errors
+'        On Error GoTo 0
+'        If lcColumnName Is Nothing Then
+'          Set lcColumnName = newTable.ListColumns.Add
+'          lcColumnName.Name = columnName
+'        End If
+'        lcColumnName.DataBodyRange.Cells(rowIndex, 1).Value = arrData(Application.Match(columnName, textColumns, 0) - 1)
+'
+'        lcColumnName.Range(1).Interior.Color = RGB(21, 96, 130)
+'
+'      Next columnName
+'    End If
+'
+'  Next rowIndex
+
+
+  '# 2b Text columns (uses same concept as formula columns, but replaces with values at the end)
+  For Each columnName In textColumns
+  
+    'Debug.Print "SyncTableData > columnName: " & columnName
+      
+    Set lcColumnName = Nothing
+          
+'    * Replaced with code under it.  Remove if working ok
+'    On Error Resume Next
+'    Set lcColumnName = newTable.ListColumns(columnName)   ' ** won't work if using Tools > Options > Break on All Errors
+'    On Error GoTo 0
+'    If lcColumnName Is Nothing Then
+'      Set lcColumnName = newTable.ListColumns.Add
+'      lcColumnName.Name = columnName
+'    End If
+
+    ' Create a dictionary to store existing column names
+    Set newDict = CreateObject("Scripting.Dictionary")
+    
+    ' Populate the dictionary with existing column names
+    For Each col In newTable.ListColumns
+        newDict.Add col.Name, col
+    Next col
+    
+    ' If the column exists already, use it, otherwise add it and use the new one (also add it to the scripting dictionary)
+    If newDict.Exists(columnName) Then
+      Set lcColumnName = newDict(columnName)
+    Else
+      Set lcColumnName = newTable.ListColumns.Add
+      lcColumnName.Name = columnName
+      newDict.Add lcColumnName.Name, lcColumnName
+    End If
+          
+    '# Add formula to look up the same ID and column name to find the previous value in the old table (or otherwise blank)
+    lcColumnName.DataBodyRange.Formula2R1C1 = _
+      "=LET(PrevVal,XLOOKUP([@ID]," & oldTable.Name & "[ID]," & oldTable.Name & "[" & columnName & "],"""")," & Chr(10) & "IF(PrevVal="""","""",PrevVal)" & Chr(10) & ")"
+    
+    '# Replace formulas with values
+    lcColumnName.DataBodyRange.value = lcColumnName.DataBodyRange.value
+    lcColumnName.Range(1).Interior.Color = RGB(21, 96, 130)
+    lcColumnName.Range.EntireColumn.autoFit
+    
+  Next columnName
+
+
+  
+  ' Step 3: Add "Added" and "Removed" formulas
+  Dim lcChangeStatusNew As ListColumn, lcChangeStatusOld As ListColumn
+  
+  ' Add "ChangeStatus" column to the new table
+  Set lcChangeStatusNew = newTable.ListColumns.Add
+  lcChangeStatusNew.Name = "ChangeStatus"
+  '# Add a formula that checks if the ID existed in the old table (will show "Added" if not), or if the comparisonColumn from modConfig has changed (will show old and new vals)
+  lcChangeStatusNew.DataBodyRange.Formula2R1C1 = _
+    "=LET(oldVal,XLOOKUP([@ID]," & oldTable.Name & "[ID]," & oldTable.Name & "[" & comparisonColumn & "],""NotFound"")," & Chr(10) & "  IF([@[" & comparisonColumn & "]]=oldVal,""""," & Chr(10) & "  IF(oldVal=""NotFound"",""Added""," & Chr(10) & "  ""Release: "" & oldVal & "" > "" & [@[" & comparisonColumn & "]]))" & Chr(10) & ")"
+      
+        '# NB: ends up like this (where "Key Col" is the name of a column where I'm checking if the value has changed:
+          '=LET(oldVal,XLOOKUP([@ID],tblOld3[ID],tblOld3[Key Col],"NotFound"),
+          '  IF([@[Key Col]]=oldVal,"",
+          '  IF(oldVal="NotFound","Added",
+          '  "Release: " & oldVal & " > " & [@[Key Col]]))
+          ')
+        
+    
+'    "=IF(ISERROR(MATCH([@" & lcID.Name & "]," & oldTable.Name & "[ID],0)),""Added"","""")"
+  lcChangeStatusNew.DataBodyRange.value = lcChangeStatusNew.DataBodyRange.value
+  lcChangeStatusNew.Range(1).Interior.Color = RGB(21, 96, 130)
+  
+  If includeChangeLog = True Then
+    ' Add "Added" rows from newTable to change log
+    Call UpdateChangeLog(newTable)
+  End If
+
+  ' Add "ChangeStatus" column to the old table
+  On Error Resume Next
+  Set lcChangeStatusOld = oldTable.ListColumns("ChangeStatus")   ' ** won't work if using Tools > Options > Break on All Errors
+  On Error GoTo 0
+  If lcChangeStatusOld Is Nothing Then
+    Set lcChangeStatusOld = oldTable.ListColumns.Add
+    lcChangeStatusOld.Name = "ChangeStatus"
+  End If
+  lcChangeStatusOld.DataBodyRange.Formula2R1C1 = _
+    "=IF(ISERROR(MATCH([@ID]," & newTable.Name & "[" & lcID.Name & "],0)),""Removed"","""")"
+  lcChangeStatusOld.DataBodyRange.value = lcChangeStatusOld.DataBodyRange.value
+  lcChangeStatusOld.Range(1).Interior.Color = RGB(21, 96, 130)
+  
+  If includeChangeLog = True Then
+    ' Add "Removed" rows from oldTable to change log
+    Call UpdateChangeLog(oldTable)
+  End If
+  
+  ' Clean up
+  Set oldDict = Nothing
+  Set newDict = Nothing
+  
+End Sub
+
+Sub UpdateChangeLog(srcTable As ListObject)
+  '# Called from SyncTableData.  Assumes have a table in a Change Log tab with at least one row, and first three columns are ID, ID2, Change Type (ID is a formula to get the link based on ID2)
+  
+  Dim wsSource As Worksheet, tblChangeLog As ListObject
+  Dim filteredArray As Variant
+  Dim startCell As Range
+  Dim changeStatusCol As Long, idCol As Long, modifiedCount As Long
+
+  ' Set the change log table
+  Set tblChangeLog = ActiveWorkbook.Worksheets("Change Log").ListObjects(1)
+
+  ' Get the column indexes (i.e. relative to the table, in case it doesn't start in column A) for "ID" and "ChangeStatus"
+  idCol = srcTable.ListColumns("ID").Index
+  changeStatusCol = srcTable.ListColumns("ChangeStatus").Index
+  ' Use COUNTIF to determine the number of rows with a value in the ChangeStatus column. I.e. =COUNTIF(tblBlah[ChangeStatus],"*?") ... a way of counting non-blanks when the column has a formula ("<>" doesn't work in this case)
+  modifiedCount = srcTable.Parent.Evaluate("COUNTIF(" & srcTable.ListColumns(changeStatusCol).DataBodyRange.Address & ",""*?"")")
+
+  ' Exit if no rows match
+  If modifiedCount = 0 Then
+      'Debug.Print "No rows with 'Added/Removed' found."
+    Exit Sub
+  End If
+
+'  '# Use FILTER only to get all columns in the table
+'  filteredArray = srcTable.Parent.Evaluate("FILTER(" & srcTable.DataBodyRange.Address & ", " & srcTable.ListColumns(changeStatusCol).DataBodyRange.Address & "=""Added"")")
+  ' Use FILTER and CHOOSE to select the desired columns and filter rows where it's not blank
+  filteredArray = srcTable.Parent.Evaluate("FILTER(CHOOSE({1,2}," & srcTable.ListColumns(idCol).DataBodyRange.Address & "," & srcTable.ListColumns(changeStatusCol).DataBodyRange.Address & "), " & srcTable.ListColumns(changeStatusCol).DataBodyRange.Address & "<>"""")")
+
+  ' Set the first cell where the array values will go - the row below the last row of the destination table, and the second column (ID2)
+  Set startCell = tblChangeLog.DataBodyRange.Cells(tblChangeLog.ListRows.count + 1, 2)
+
+  ' Process based on the number of rows
+  If modifiedCount = 1 Then
+    ' Write the single row (1D array)
+    startCell.Resize(1, UBound(filteredArray)).value = filteredArray
+  Else
+    ' Write multiple rows (2D array)
+    startCell.Resize(UBound(filteredArray, 1), UBound(filteredArray, 2)).value = filteredArray
+  End If
+
+End Sub
+
+
+
+Sub uniqueValuesAndDebugPrint()
+ 
+''Gets the unique values from a range (upd to make the range the current tbl col)
+'
+'On Error Resume Next
+'validationFormula = ActiveCell.Validation.Formula1
+'On Error GoTo 0
+'
+'Debug.Print validationFormula
+'End
+ 
+'myResult = WorksheetFunction.Sort(WorksheetFunction.Unique(Range("A2:A17")))
+colRange = ActiveSheet.ListObjects(1).ListColumns(ActiveCell.Column).DataBodyRange
+myResult = WorksheetFunction.Sort(WorksheetFunction.Unique(colRange))
+ 
+For i = LBound(myResult, 1) To UBound(myResult, 1)
+    Debug.Print myResult(i, 1)
+Next i
+ 
+End Sub
+
+Sub uniqueValues()
+ 
+If ActiveSheet.ListObjects.count <> 1 Then
+    MsgBox "Need 1 table only to use this"
+    Exit Sub
+End If
+ 
+ 
+tblNm = ActiveSheet.ListObjects(1).Name
+Debug.Print "A " & tblNm
+'ActiveCell.ListObject.HeaderRowRange.Cells(1, 1).Column 'CAN DO SOMETHING WITH THIS LATER TO CATER FOR TBLS NOT IN FIRST COLUMN
+colNm = ActiveCell.ListObject.HeaderRowRange.Cells(1, Selection.Column)
+ 
+Sheets.Add after:=ActiveSheet
+ 
+ 
+'---
+Debug.Print tblNm
+Debug.Print colNm
+Debug.Print "=SORT(UNIQUE(" & tblNm & "[" & colNm & "]))"
+'---
+ 
+Range("A2").Formula2R1C1 = "=SORT(UNIQUE(" & tblNm & "[" & colNm & "]))"
+ 
+Columns("A:A").Select
+Selection.Copy
+Selection.PasteSpecial Paste:=xlPasteValues, Operation:=xlNone, SkipBlanks:=False, Transpose:=False
+ 
+Application.CutCopyMode = False
+Columns("A:A").EntireColumn.autoFit
+ 
+ 
+With Range("A1")
+    .value = colNm
+    .Font.Bold = True
+    .Select
+End With
+ 
+ActiveSheet.Name = colNm
+ 
+TbCreate
+ 
+If ActiveSheet.UsedRange.SpecialCells(xlCellTypeLastCell) = 0 Then
+    ActiveSheet.UsedRange.SpecialCells(xlCellTypeLastCell).Delete Shift:=xlUp
+End If
+ 
+ 
+End Sub
+
+
+Sub showColumns(colsArray)
+'# Pass in an array of column names to only show those columns. E.g. ...
+    '# showColumns (Array("id", "colA"))
+
+TbSetup
+
+On Error Resume Next
+
+tb.Range.EntireColumn.Hidden = True
+For Each col In colsArray
+    tb.ListColumns(col).Range.EntireColumn.Hidden = False
+Next
+
+End Sub
+
+
+Sub pasteValue()
+ 
+On Error Resume Next
+ 
+Selection.PasteSpecial Paste:=xlPasteValues, Operation:=xlNone, SkipBlanks:=False, Transpose:=False
+ 
+ActiveSheet.PasteSpecial Format:="Text", Link:=False, DisplayAsIcon:=False
+ 
+ActiveCell.Offset(1, 0).Select
+ 
+'Application.CutCopyMode = False
+ 
+End Sub
+
+
+
+Function tableName()
+'Returns the value "tableName" (because it's a function, need to use the function name for the value)
+
+On Error GoTo notInTable
+tableName = ActiveCell.ListObject.Name
+On Error GoTo 0
+Exit Function
+
+'----
+notInTable:
+tableName = ""
+
+End Function
+
+
+Sub tblMisc()
+'Gets the name using my tableName function
+
+If tableName = "" Then
+    Debug.Print "tblMisc: not in table"
+    Exit Sub
+End If
+'------------
+    
+Debug.Print _
+    "tblMisc: " & vbCr & _
+    tableName(), _
+    ActiveSheet.ListObjects(tableName).HeaderRowRange.Address, _
+    ActiveSheet.ListObjects(tableName).DataBodyRange(1, 2)
+
+End Sub
+
+Sub currColUsedRange()
+
+Debug.Print ActiveSheet.UsedRange.Columns(ActiveCell.Column).Address
+
+End Sub
+
+Sub magicMacro()
+ 
+'TbSetup
+  
+If ActiveWorkbook.Name = "Tasks.xlsx" Then
+  Selection.WrapText = Not Selection.WrapText
+
+Else
+    MsgBox "No macro options here"
+End If
+
+End Sub
+
+
+Sub goToNextVisibleCellDownInColumn()
+
+'''Moves down to the next cell that isn't hidden
+'''Can set blanksOnly to 0 or 1 (i.e. go to any visible cell, or only blank ones)
+
+'''Based on https://stackoverflow.com/questions/17890004/using-an-or-function-within-range-find-vba
+'''Only works if table starts in A1
+'''Uses Find to get the next blank or non blank cell (I originally had as below, but Find it doesn't actually search non visible anyway)
+    'Set rngNextBlank = ActiveCell.ListObject.DataBodyRange.Columns(ActiveCell.Column).SpecialCells(xlCellTypeVisible).Find(What:="", _
+
+Dim rngNextBlank As Range
+Dim rngNextNonBlank As Range
+Dim blanksOnly
+
+blanksOnly = 1  'Set to 1 to only jump to blank cells
+
+'''Find the next blank visible cell in the current table column (doesn't have ".Activate" at the end to actually jump to it, just gets the range where it would be)
+Set rngNextBlank = ActiveCell.ListObject.DataBodyRange.Columns(ActiveCell.Column).Find(What:="", _
+    after:=ActiveCell, LookIn:=xlValues, LookAt:=xlPart, SearchOrder:=xlByColumns, _
+    SearchDirection:=xlNext, MatchCase:=False, SearchFormat:=False)
+
+'''Find the next non blank cell
+Set rngNextNonBlank = ActiveCell.ListObject.DataBodyRange.Columns(ActiveCell.Column).Find(What:="*", _
+    after:=ActiveCell, LookIn:=xlValues, LookAt:=xlPart, SearchOrder:=xlByColumns, _
+    SearchDirection:=xlDown, MatchCase:=False, SearchFormat:=False)
+
+'Debug.Print ActiveCell.Row & ", " & rngNextBlank.Row & ", " & rngNextNonBlank.Row
+
+If blanksOnly = 1 Then
+    '''Only check if there are any non blank cells found and then jump to the next one down
+    If Not rngNextBlank Is Nothing Then
+        If rngNextBlank.row > ActiveCell.row Then
+            Cells(rngNextBlank.row, ActiveCell.Column).Select
+        End If
+    End If
+ElseIf Not rngNextBlank Is Nothing And Not rngNextNonBlank Is Nothing Then
+    '''It's found both blank and non blank
+    If rngNextBlank.row > ActiveCell.row And rngNextNonBlank.row > ActiveCell.row Then
+        Debug.Print "A1: both cells found are below the active cell"
+        Cells(Application.Min(rngNextBlank.row, rngNextNonBlank.row), ActiveCell.Column).Select
+    ElseIf rngNextBlank.row > ActiveCell.row Then
+        Debug.Print "A2: only the blank cell is below the active cell (the non blank is above, so ignore it)"
+        Cells(rngNextBlank.row, ActiveCell.Column).Select
+    ElseIf rngNextNonBlank.row > ActiveCell.row Then
+        Debug.Print "A3: only the non blank cell is below the active cell (the blank cell is above, so ignore it)"
+        Cells(rngNextNonBlank.row, ActiveCell.Column).Select
+    Else
+        Debug.Print "A4: at the bottom, won't do anything"
+    End If
+ElseIf rngNextBlank Is Nothing Then
+    '''i.e. no blank cells visible in the active column
+    If rngNextNonBlank Is Nothing Then
+        Debug.Print "B: neither found (shouldn't ever happen?)"
+    Else
+        Debug.Print "C: only non blank cells, will jump to the next unless at the bottom"
+        If rngNextNonBlank.row > ActiveCell.row Then
+            Cells(rngNextNonBlank.row, ActiveCell.Column).Select
+        End If
+    End If
+Else
+    '''i.e. no non blank cells visible in the active column
+    'Debug.Print "D: only looking for blank cells, and there are none"
+
+    If rngNextBlank.row > ActiveCell.row Then
+        Debug.Print "E: only blank cells, will jump to the next unless at the bottom"
+        Cells(rngNextBlank.row, ActiveCell.Column).Select
+    End If
+End If
+
+End Sub
+
+Sub appUpd()
+Application.ScreenUpdating = False
+For i = 1 To 2000
+    ActiveCell.value = i
+    ActiveCell.Offset(1, 0).Select
+'    Cells(i, 1).Value = i
+Next
+Application.ScreenUpdating = True
+
+ActiveCell.Offset(-1, 0).Select
+
+End Sub
+
+
+Sub errorTesting()
+
+On Error GoTo ErrHandler
+1 Debug.Print 5 / 2
+2 Debug.Print 5 / 0
+3 Debug.Print 5 / 1
+
+Exit Sub
+'--------------------
+
+ErrHandler:
+'MsgBox "Something went wrong, see log"
+Debug.Print "Err: " & Erl, Err.Number, Err.Description
+''NB: shd do things like turn ScrUpdg back on here
+''Downside overall = harder to spot where it happened, but maybe good for sharing w others
+Resume Next
+End Sub
+
+Sub rowMoveDown()
+        
+    Dim thisRow, thisCol
+    thisRow = Selection.row
+    thisCol = Selection.Column
+    
+    Rows(thisRow).Cut
+    Rows(thisRow + 2).Insert Shift:=xlDown
+    Cells(thisRow + 1, thisCol).Select
+    
+End Sub
+
+Sub rowMoveUp()
+    
+    Dim thisRow, thisCol
+    thisRow = Selection.row
+    thisCol = Selection.Column
+    
+    Rows(thisRow).Cut
+    Rows(thisRow - 1).Insert Shift:=xlDown
+    Cells(thisRow - 1, thisCol).Select
+
+End Sub
+
+
+'' IN PROGRESS -----------------------------------------------------------------------------------------
+
+Sub pivotTable1()
+ 
+'Expand all has too many extras?
+' Remember I had to remove all with " Count"
+' Maybe separate departments into separate sheets?
+ 
+ 
+'Need before make a table
+'ActiveSheet.SummaryRow = xlAbove
+ 
+ 
+ActiveSheet.Outline.ShowLevels RowLevels:=4
+ActiveSheet.Outline.ShowLevels RowLevels:=3
+ActiveSheet.Outline.ShowLevels RowLevels:=2
+ActiveSheet.Outline.ShowLevels RowLevels:=1
+End
+ 
+For n = 0 To ActiveCell.IndentLevel
+If n <> 0 Then
+Selection.Rows.Group
+End If
+Next
+ 
+ActiveCell.Offset(1, 0).Select
+ 
+ 
+ 
+End
+ 
+ 
+ 
+With ActiveSheet.Outline
+.AutomaticStyles = False
+.SummaryRow = xlAbove
+.SummaryColumn = xlLeft
+End With
+ 
+ 
+ActiveSheet.PivotTables("PivotTable5").PivotFields("xyz"). _
+PivotItems("ddd").DrillTo "Name"
+End Sub
+ 
+Sub pivotTable2()
+'For Each Pi In ActiveSheet.PivotTables("PivotTable5").PivotFields("aaa").PivotItems
+' Debug.Print Pi
+' ActiveSheet.PivotTables("PivotTable5").PivotFields("aaa").PivotItems(Pi).DrillTo "Name"
+'Next
+ 
+'For n = 1 To ActiveSheet.PivotTables("PivotTable5").PivotFields("aaa").PivotItems.Count
+' 'Debug.Print Pi
+'' ActiveSheet.PivotTables("PivotTable5").PivotFields("aaa").PivotItems(n).DrillTo "Name"
+' ActiveSheet.PivotTables("PivotTable5").PivotFields("aaa").PivotItems(n).DrillTo "aaa"
+'Next
+ 
+'ActiveSheet.PivotTables("PivotTable5").PivotFields("bbb").PivotItems("ccc").ShowDetail = False
+'ActiveSheet.PivotTables("PivotTable5").PivotFields("bbb").PivotItems("ddd").DrillTo "bbb"
+'ActiveSheet.PivotTables("PivotTable5").PivotFields("bbb").ShowDetail = False
+'ActiveSheet.PivotTables("PivotTable5").PivotFields("eee").ShowDetail = False
+ 
+ 
+'Debug.Print ActiveSheet.PivotTables("PivotTable5").PivotFields.Count
+'End
+For n = 1 To ActiveSheet.PivotTables("PivotTable5").RowFields.count
+Debug.Print ActiveSheet.PivotTables("PivotTable5").RowFields(n).Position
+On Error Resume Next 'Haven't yet got a good way to do in order, and to know which is last (i.e. can't expand further)
+ActiveSheet.PivotTables("PivotTable5").RowFields(n).ShowDetail = False
+On Error GoTo 0
+Next
+ 
+End Sub
+
+Sub arrayExampleOneDimension()
+''Simple example for static one dimension array, and outputting it two different ways
+
+Dim myArray As Variant
+
+myArray = Array("Orange", "Peach", "Pear")
+
+Debug.Print UBound(myArray), UBound(myArray, 1)
+
+For i = LBound(myArray) To UBound(myArray)
+    Debug.Print i; myArray(i)
+Next i
+
+For Each fruit In myArray
+    Debug.Print fruit
+Next fruit
+
+End Sub
+
+Public Sub arrayExampleTwoDimensions()
+''https://excelmacromastery.com/
+    
+' Declare a two dimensional array
+Dim arrMarks(0 To 3, 0 To 2) As String
+
+' Fill the array with text made up of i and j values
+Dim i As Long, j As Long
+For i = LBound(arrMarks) To UBound(arrMarks)
+    For j = LBound(arrMarks, 2) To UBound(arrMarks, 2)
+        arrMarks(i, j) = CStr(i) & ":" & CStr(j)
+    Next j
+Next i
+
+arrMarks(2, 1) = "abc"
+
+Debug.Print UBound(arrMarks), UBound(arrMarks, 1), UBound(arrMarks, 2)
+
+Debug.Print "------------------"
+
+' Print the values in the array to the Immediate Window
+Debug.Print "i", "j", "Value"
+For i = LBound(arrMarks) To UBound(arrMarks)
+    For j = LBound(arrMarks, 2) To UBound(arrMarks, 2)
+        Debug.Print i, j, arrMarks(i, j)
+    Next j
+Next i
+
+Debug.Print "------------------"
+
+Debug.Print "Value"
+Dim mark As Variant
+For Each mark In arrMarks
+    Debug.Print mark
+Next mark
+
+End Sub
+
+Public Sub ReadAndDisplay()
+
+    ' Get Range
+    Dim rg As Range
+    Set rg = ActiveSheet.Range("C3:E6")
+
+    ' Create dynamic array
+    Dim StudentMarks As Variant
+
+    ' Read values into array from sheet1
+    StudentMarks = rg.value
+
+    ' Print the array values
+    Debug.Print "i", "j", "Value"
+    Dim i As Long, j As Long
+    For i = LBound(StudentMarks) To UBound(StudentMarks)
+        For j = LBound(StudentMarks, 2) To UBound(StudentMarks, 2)
+            Debug.Print i, j, StudentMarks(i, j)
+        Next j
+    Next i
+
+End Sub
+
+
+Public Sub ReadToArray()
+
+    ' Read values into array from first row
+    Dim StudentMarks  As Variant
+    StudentMarks = Range("A1:C4").value
+
+    Dim i As Long
+    For i = LBound(StudentMarks) To UBound(StudentMarks)
+        ' Update marks here
+        StudentMarks(i, 1) = StudentMarks(i, 1) * 2
+        '...
+    Next i
+
+    ' Write the new values back to the worksheet
+    Range("A1:C4").value = StudentMarks
+
+End Sub
+
+
+
+Sub drawLinesBetweenMatchingCells()
+'' Find matching cells in two columns and draw a line between them
+
+Dim beginCell As Range, endCell As Range, range1 As Range, range2 As Range
+
+TbSetup
+Set range1 = tb.ListColumns("AA").DataBodyRange
+Set range2 = tb.ListColumns("DD").DataBodyRange
+
+'Set range1 = Range("A2:A10").Cells
+'Set range2 = Range("D2:D10").Cells
+
+For Each beginCell In range1.Cells
+
+  For Each endCell In range2.Cells
+
+    If endCell.value = beginCell.value Then
+      ''Add a connector with BeginX/BeginY being the right of the first cell and halfway down, and the EndX/EndY being left of the second cell and halfway down.
+      
+      ActiveSheet.Shapes.AddConnector(msoConnectorStraight, _
+        beginCell.Left + beginCell.Width - 5, _
+        beginCell.Top + beginCell.Height / 2, _
+        endCell.Left, _
+        endCell.Top + endCell.Height / 2 _
+      ).Select
+
+      Selection.ShapeRange.Line.EndArrowheadStyle = msoArrowheadTriangle
+
+      Exit For
+
+    End If
+
+  Next
+
+Next
+
+End Sub
+
+Sub deleteLines()
+
+For Each shp In ActiveSheet.Shapes
+  If shp.Name Like "*Straight Arrow Connector*" Then
+    shp.Delete
+  End If
+Next
+
+End Sub
+
+Sub xxx()
+opts = Array("b3", "c", "4", "45", "AA356")
+
+
+For Each opt In opts
+  
+  iscell = False
+
+  If (IsNumeric(opt)) Then
+    dP (opt & ": row")
+    
+  Else
+    For n = 1 To Len(opt)
+      If (IsNumeric(Mid(opt, n, 1))) Then
+        iscell = True
+      End If
+    Next
+        
+    If iscell = True Then
+      dP (opt & ": cell")
+    Else
+      dP (opt & ": col")
+    End If
+
+  End If
+  
+Next
+
+End Sub
+
+Function GetWorkbooks(Optional selectionType As String) As Variant
+  '# Returns an array of workbook objects matching the selectionType criteria (if not provided - returns all workbooks, including hidden)
+  '# (NB: VBA functions cannot directly return arrays of object types, like Workbook, unless the return type is Variant)
+
+  '# selectionType options (for now not using enum since it needs to be declared at module level):
+    ' "visible", "withTable" (other workbooks that have a table in them)
+
+  Dim item As Workbook
+  Dim interimArray() As Workbook
+  Dim i As Long
+  Dim includeItem As Boolean
+
+  ' Initialize a dynamic array
+  ReDim interimArray(0)
+  i = -1  ' Start at -1 to handle resizing correctly
+ 
+ 
+  For Each item In Workbooks
+    includeItem = False
+    
+    Select Case selectionType
+      
+      Case "visible"    '# Only include visible workbooks
+        If Windows(item.Name).Visible = True Then includeItem = True
+      
+      Case Else         '# Default is to include visible workbooks only
+        If Windows(item.Name).Visible = True Then includeItem = True
+
+    End Select
+
+    ' Add item if it meets the criteria
+    If includeItem Then
+      i = i + 1
+      ReDim Preserve interimArray(i)
+      Set interimArray(i) = item
+    End If
+    
+    'Debug.Print "GetItems: "; item.Name; " "; includeItem
+
+  Next item
+  
+  'Debug.Print "-------"
+    
+  ' Handle case where no items matched criteria
+  If i = -1 Then
+    GetWorkbooks = Array()  ' Return an empty array
+  Else
+    '# Assigns the dynamic array interimArray (which contains Workbook object references) to the function's return value, making it the output of the GetWorkbooks function.
+    GetWorkbooks = interimArray
+  End If
+  
+  '## Other notes
+  '# Since the return type of GetWorkbooks is declared as Variant, the array is automatically wrapped in a Variant to allow it to be passed or returned (functions cannot directly return arrays of objects unless the return type is Variant).
+  
+End Function
+
+Function GetSheets(Optional selectionType As String, Optional parentWorkbook As Workbook) As Variant
+  '# Returns an array of worksheet objects matching the selectionType criteria (if not provided - returns all sheets, including hidden)
+  '# (NB: VBA functions cannot directly return arrays of object types, like Worksheet, unless the return type is Variant)
+  '# Can optionally pass in a 'parent' workbook if not referring to sheets in the active workbook
+
+  '# selectionType options (for now not using enum since it needs to be declared at module level):
+    ' "visible", "withTable" (other sheets that have a table in them)
+
+  Dim result As New Collection
+  Dim item As Worksheet
+  Dim interimArray() As Worksheet
+  Dim i As Long
+  Dim includeItem As Boolean
+
+  If parentWorkbook Is Nothing Then
+    Set parentWorkbook = ActiveWorkbook
+  End If
+
+  ' Initialize a dynamic array
+  ReDim interimArray(0)
+  i = -1  ' Start at -1 to handle resizing correctly
+ 
+ 
+  For Each item In parentWorkbook.Sheets
+    includeItem = False
+    
+    Select Case selectionType
+      
+      Case "visible"    '# Only include visible sheets
+        If item.Visible = xlSheetVisible Then includeItem = True
+      
+      Case "withTable"  '# Only include sheets other than the current sheet, and with a single table in them
+'        If item.Name <> ActiveSheet.Name And item.ListObjects.count = 1 Then includeItem = True
+        'If item <> ActiveSheet And item.ListObjects.count = 1 Then includeItem = True
+        If item.ListObjects.count = 1 Then includeItem = True
+      
+      Case Else         '# Default is to include all sheets, including hidden
+        includeItem = True
+    
+    End Select
+
+    ' Add item if it meets the criteria
+    If includeItem Then
+      i = i + 1
+      ReDim Preserve interimArray(i)
+      Set interimArray(i) = item
+    End If
+    
+    'Debug.Print "GetItems: "; item.Name; " "; includeItem
+
+  Next item
+  
+'  Debug.Print "IsArrayPopulated(Me.itemsArray): "; IsArrayPopulated(Me.itemsArray)
+  
+  If i = -1 Then
+    '# I.e. no items matched criteria
+      'Debug.Print "GetSheets: i = -1"
+      result.Add Array(), "SheetsArray"  ' Add an empty array to the collection
+  
+  Else
+'    '# Assigns the dynamic array interimArray (which contains Worksheet object references) to the collection in the function's return value, making it the output of the GetSheets function.
+      result.Add interimArray, "SheetsArray"  ' Add the populated array to the collection
+  
+  End If
+  
+  result.Add parentWorkbook, "ParentWorkbook"  ' Add the parent workbook to the collection
+  
+  Set GetSheets = result
+  
+'  '## Other notes
+'  '# Since the return type of GetSheets is declared as Variant, the array is automatically wrapped in a Variant to allow it to be passed or returned (functions cannot directly return arrays of objects unless the return type is Variant).
+
+End Function
+
+Function GetColumns(Optional selectionType As String, Optional parentWorksheet As Worksheet) As Variant
+  '# Returns an array of listColumn objects matching the selectionType criteria (if not provided - returns all columns, including hidden)
+  '# (NB: VBA functions cannot directly return arrays of object types, like ListColumn, unless the return type is Variant)
+
+  '# selectionType options (for now not using enum since it needs to be declared at module level):
+    ' "visible"
+
+  Dim result As New Collection
+  Dim item As ListColumn
+  Dim interimArray() As ListColumn
+  Dim i As Long
+  Dim includeItem As Boolean
+
+  If parentWorksheet Is Nothing Then
+    Set parentWorksheet = ActiveSheet
+  End If
+  
+  ' Initialize a dynamic array
+  ReDim interimArray(0)
+  i = -1  ' Start at -1 to handle resizing correctly
+ 
+'OLD?  TbSetup
+'?  If ActiveSheet.ListObjects.count = 1 Then           '' if there is only one table in the sheet, use it
+'?    Set tb = ActiveSheet.ListObjects(1)
+
+'OLD  For Each item In tb.ListColumns
+  
+  For Each item In parentWorksheet.ListObjects(1).ListColumns     '* ToDo: handle if was in a sheet without a table, gives error here
+    includeItem = False
+    
+    Select Case selectionType
+      
+      Case "visible"    '# Only include visible sheets
+        If item.Range.EntireColumn.Hidden = False Then includeItem = True
+      
+      Case Else         '# Default is to include all sheets, including hidden
+        includeItem = True
+    
+    End Select
+
+    ' Add item if it meets the criteria
+    If includeItem Then
+      i = i + 1
+      ReDim Preserve interimArray(i)
+      Set interimArray(i) = item
+    End If
+    
+'    Debug.Print "GetItems: "; item.Name; " "; includeItem
+
+  Next item
+  
+'DELETE SOON
+'  ' Handle case where no items matched criteria
+'  If i = -1 Then
+'    GetColumns = Array()  ' Return an empty array
+'  Else
+'    '# Assigns the dynamic array interimArray (which contains Worksheet object references) to the function's return value, making it the output of the GetColumns function.
+'    GetColumns = interimArray
+'  End If
+  
+  If i = -1 Then
+    '# I.e. no items matched criteria
+      'Debug.Print "GetColumns: i = -1"
+      result.Add Array(), "ColumnsArray"  ' Add an empty array to the collection
+  
+  Else
+'    '# Assigns the dynamic array interimArray (which contains Worksheet object references) to the collection in the function's return value, making it the output of the GetSheets function.
+      result.Add interimArray, "ColumnsArray"  ' Add the populated array to the collection
+  
+  End If
+  
+  result.Add parentWorksheet, "ParentWorksheet"  ' Add the parent worksheet to the collection
+  
+  Set GetColumns = result
+  
+  
+  '## Other notes
+  '# Since the return type of GetColumns is declared as Variant, the array is automatically wrapped in a Variant to allow it to be passed or returned (functions cannot directly return arrays of objects unless the return type is Variant).
+  
+End Function
+
+
+Sub testgetSheets()
+
+  'allSheets = GetSheets()
+  'allSheets = GetSheets("visible")
+  allSheets = GetSheets("withTable")
+
+  If Not IsArray(allSheets) Or LBound(allSheets) > UBound(allSheets) Then
+    Debug.Print "getSheets: No sheets matched the criteria."
+  Else
+    Debug.Print "UBound: " & UBound(allSheets)
+    For i = LBound(allSheets) To UBound(allSheets)
+      Debug.Print allSheets(i).Name
+    Next i
+  End If
+    
+End Sub
+
+Function IsArrayPopulated(arr As Variant) As Boolean
+  '# Doesn't seem to be anything standard, so this function is a way to check
+
+  If IsArray(arr) Then
+    If TypeName(arr) <> "Empty" Then
+      'Debug.Print "IsArrayPopulated: LBound(arr), UBound(arr): "; LBound(arr); ", ", UBound(arr)
+      If LBound(arr) <= UBound(arr) Then
+        IsArrayPopulated = True
+        Exit Function ';;;
+      End If
+    End If
+  End If
+  
+  IsArrayPopulated = False
+  
+End Function
+
+
+Function regexResult(searchVal, rxMainPattern, searchType As searchTypes)
+'' Call this function to test `searchVal` against the regex pattern `rxMainPattern` along with the flag added based on `searchType`
+    '' see examplesRegexResult for an example of this in use
+    '' searchType is based on my own Enum `searchTypes` (at the top of the module)
+
+''First two lines can be used as is.
+Dim myRx As Object, rxFlag
+Set myRx = CreateObject("VBScript.RegExp")
+''Could use these two lines instead if activate the Regex object reference library first: Tools > References > Microsoft VBScript Regular Expressions 5.5
+'Dim myRx As Object, rxFlag
+'Set myRx = New RegExp
+
+
+''Adds `\b` to the start of the pattern to search word boundaries, e.g. will make it search \bBLAH which will return true for ABC BLAH but not for ABC XYZBLAH
+'Debug.Print bob, StartOfWord, searchType
+If searchType = StartOfWord Then
+    rxFlag = "\b"
+End If
+
+With myRx
+    ''All properties for the RegEx object are listed here (they are all boolean except the first)
+    .Pattern = rxFlag & rxMainPattern
+    Debug.Print .Pattern
+    .IgnoreCase = True
+    .Global = False
+    .MultiLine = True
+
+    ''Then runs the test against the searchVal and returns it
+    regexResult = .test(searchVal)
+    
+End With
+
+End Function
+Sub examplesRegexResult()
+
+Dim rxMainPattern, myStrs, myStr
+
+rxMainPattern = "jo"
+
+myStrs = Array("000111fjt88a8", "John Davidson", "David Jones", "Kate Mojo", "xxx")
+
+For Each myStr In myStrs
+    dP regexResult(myStr, rxMainPattern, AnyPartOfWord) & ":" & vbTab & myStr
+Next
+
+End Sub
+
+Function StripNonAlphanumeric(inputString As String) As String
+  
+  Dim regex As Object
+  Set regex = CreateObject("VBScript.RegExp")
+  
+  With regex
+    .Pattern = "[^a-zA-Z0-9]" ' Match anything that is not a letter or a digit
+    .Global = True ' Ensures all matches in the string are replaced, not just the first one.
+
+  End With
+  
+  ' Replace all non-alphanumeric characters with an empty string
+  StripNonAlphanumeric = regex.Replace(inputString, "")
+
+End Function
+
+Sub errorsCheck()
+
+Dim sh As Worksheet, c As Range, errList
+
+For Each sh In Sheets
+        
+    For Each c In sh.UsedRange.Cells
+        
+        If VarType(c.value) = vbError Then      'Picks up cells where the 'value' shows as e.g. #REF! , #VALUE! etc
+            GoTo StopWhenErrorFound
+            'errList = errList & sh.Name & ": " & c.Address & vbCr
+            
+        ElseIf c.Formula Like "*[#]*!*" Then    'Picks up cells where e.g. there is a #REF! in the formula but may not be obvious (e.g. value shows as 0)
+            GoTo StopWhenErrorFound
+            'errList = errList & sh.Name & ": " & c.Address & vbCr
+            
+        End If
+    
+    Next
+       
+    'Cells.Find(What:="#*!", After:=ActiveCell, LookIn:=xlValues, LookAt:=xlPart, MatchCase:=False, SearchFormat:=False).Activate
+    'Cells.Find(What:="#*!", After:=ActiveCell, LookIn:=xlFormulas, LookAt:=xlPart, MatchCase:=False, SearchFormat:=False).Activate
+
+Next
+
+'Will only do anything if disable `GoTo` lines and enable the `errList` lines
+If errList <> "" Then
+    MsgBox errList
+End If
+
+Exit Sub '--------------------
+
+StopWhenErrorFound:
+sh.Select
+c.Select
+
+End Sub
+
+Sub combineRowBelow()
+''Each cell in the following row gets combined into the current row's cell on a new line (if it has a value in it)
+''Relies on being in a table
+
+Dim c As Range
+
+For Each c In ActiveSheet.ListObjects(1).DataBodyRange.Rows(Selection.row - 1).Cells
+    If c.Offset(1, 0).value <> "" Then
+        'Debug.Print c.Value & vbNewline & c.Offset(1, 0).Value & vbNewLine & "---"
+        c.value = c.value & vbNewLine & c.Offset(1, 0).value
+    End If
+Next
+
+ActiveSheet.ListObjects(1).DataBodyRange.Rows(Selection.row).Delete
+
+End Sub
+
+Sub commentsTest()
+
+Dim c As Range
+
+For Each c In Selection.Cells
+    
+    dP (c.Address)
+
+    On Error Resume Next
+    
+    ''Get the text of the comment (can't check if it exists, so use the error stmt)
+    dP (c.CommentThreaded.Text)
+    On Error GoTo 0
+
+Next
+
+End Sub
+
+
+Sub conditionalFormattingAdd()
+
+Dim rng As Range, cf As FormatCondition
+
+Set rng = ActiveSheet.Range("A:E")
+
+'# Clear existing formats (can choose for the same range, or whole sheet
+'rng.FormatConditions.Delete
+'ActiveSheet.UsedRange.FormatConditions.Delete
+
+Set cf = rng.FormatConditions.Add(Type:=xlExpression, _
+  Formula1:="=$C1=""Epic""")
+cf.Interior.Color = RGB(200, 200, 200)
+cf.Font.Bold = True
+
+Set cf = rng.FormatConditions.Add(Type:=xlExpression, _
+  Formula1:="=$C1=""Feature""")
+cf.Interior.Color = RGB(230, 230, 230)
+
+
+End Sub
+
+Sub insertCellAndMoveDown()
+
+Selection.Insert Shift:=xlDown, CopyOrigin:=xlFormatFromLeftOrAbove
+
+End Sub
+
+Sub borderStyles()
+
+Dim bordersArray, borderType, flowOption
+
+''Set which borders are adding based on the options below
+flowOption = 2
+
+bordersArray = Array(xlEdgeLeft, xlEdgeTop, xlEdgeBottom, xlEdgeRight, xlInsideVertical, xlInsideHorizontal)
+
+For Each borderType In bordersArray
+    dP borderType
+    If flowOption = 1 Then ''No borders
+        Selection.Borders(borderType).LineStyle = xlNone
+    ElseIf flowOption = 2 Then ''Bold red dashed borders
+        With Selection.Borders(borderType)
+            .Weight = xlMedium
+            .Color = -16776961
+            .LineStyle = xlDash
+            .TintAndShade = 0
+        End With
+    End If
+
+Next
+
+End Sub
+
+Sub tickCross()
+''insert green tick, or set back to blank if is one already
+
+'' if no tick/cross then tick
+If Selection.Font.Name <> "Wingdings 2" Then
+    With Selection.Font
+        .Name = "Wingdings 2"
+        .Size = 11
+        .Color = -11489280 'Green
+        .TintAndShade = 0
+    End With
+    Selection.value = "P"
+    Selection.Font.Bold = True
+
+'' if tick then cross
+ElseIf Selection.value = "P" Then
+
+    With Selection.Font
+        .Name = "Wingdings 2"
+        .Size = 11
+        '.Color = -16776961 'Red
+        .Color = -16777024 'Dark red
+        .TintAndShade = 0
+    End With
+    Selection.value = "O"
+    Selection.Font.Bold = True
+
+'' otherwise (will be cross) then blank
+Else
+    With Selection.Font
+    .Name = "Segoe UI"
+    .Size = 10
+    .ColorIndex = xAutomatic
+    .TintAndShade = 0
+    End With
+    Selection.value = ""
+    Selection.Font.Bold = False
+    
+End If
+
+End Sub
+
+Sub highlightToggle()
+
+If Selection.Interior.Pattern = xlSolid Then
+    
+    With Selection.Interior
+        .Pattern = xlNone
+    End With
+
+Else
+    
+    With Selection.Interior
+        .Pattern = xlSolid
+        .Color = 13434879
+    End With
+
+End If
+
+End Sub
+
+Sub HyperlinksFollowOLD()
+  '# Basic initial version using the adoURL and the ID column for the current row (can be multiple rows)
+  Dim c As Range
+  
+  TbSetup
+  
+  For Each c In Selection.Cells
+    If Not c.EntireRow.Hidden Then
+       Debug.Print GetHyperlinkFormulaURL(c)
+'      ActiveWorkbook.FollowHyperlink adoURL & TbCellVal(c.row - tb.HeaderRowRange.row, "ID")
+    End If
+  Next
+
+End Sub
+
+Sub HyperlinksFollow()
+  '# Basic initial version that uses the adoURL and the ID column for the row (can be multiple rows)
+
+  Dim c As Range
+  Dim baseURL As String
+  Dim url As String
+  Dim r As Long
+  
+  TbSetup
+  
+  ' Get hyperlink base once
+  baseURL = GetTextBetweenQuotesAfterHyperlink(Selection.Cells(1).Formula)
+  
+  For Each c In Selection
+    If Not c.EntireRow.Hidden Then
+      
+      r = c.row - tb.HeaderRowRange.row
+      url = baseURL & TbCellVal(r, "ID")
+      
+      ActiveWorkbook.FollowHyperlink Address:=url
+      
+    End If
+  Next
+
+End Sub
+
+
+Function GetTextBetweenQuotesAfterHyperlink(formulaText As String) As String
+  '# Find text between the first pair of quotes after 'HYPERLINK'
+
+  Dim startPos As Long
+  Dim firstQuote As Long
+  Dim secondQuote As Long
+  
+  startPos = InStr(1, formulaText, "HYPERLINK", vbTextCompare)
+  If startPos = 0 Then Exit Function
+  
+  firstQuote = InStr(startPos, formulaText, """")
+  secondQuote = InStr(firstQuote + 1, formulaText, """")
+  
+  If firstQuote > 0 And secondQuote > 0 Then
+    GetTextBetweenQuotesAfterHyperlink = Mid(formulaText, firstQuote + 1, secondQuote - firstQuote - 1)
+  End If
+
+End Function
+
+Function GetHyperlinkFormulaURL(cell As Range) As String
+    
+    Dim f As String, pos As Long, startPos As Long, commaPos As Long
+    Dim arg As String
+    
+    GetHyperlinkFormulaURL = ""
+    
+    If Not cell.HasFormula Then Exit Function
+    
+    f = cell.Formula
+    
+    startPos = InStr(1, UCase(f), "HYPERLINK(") + Len("HYPERLINK(")
+    commaPos = InStr(startPos, f, ",")
+    
+    arg = Mid$(f, startPos, commaPos - startPos)
+    arg = Trim(arg)
+    Debug.Print arg
+    
+    GetHyperlinkFormulaURL = cell.Parent.Evaluate("=" & arg)
+
+End Function
+
+
+
+Sub formatTextWithinCell()
+
+Dim sectionStartsCount, sectionEndsCount
+Dim count As Integer
+Dim targetStart As String, targetEnd As String
+Dim cell As Object
+Dim n As Integer
+Dim exceptionMessage As String
+
+targetStart = "{"
+targetEnd = "}"
+'targetStart = "(Blah:"
+'targetEnd = ")"
+
+For Each cell In Selection
+
+    ''Check how many instances of targetStart and targetEnd there are
+    sectionStartsCount = (Len(cell.value) - Len(Replace(cell.value, targetStart, ""))) / Len(targetStart) ''Division caters for targetStart being more than one character
+    sectionEndsCount = Len(cell.value) - Len(Replace(cell.value, targetEnd, ""))
+
+    Debug.Print Len(targetStart)
+    Debug.Print sectionStartsCount; sectionEndsCount
+
+    count = 0
+    n = 0
+    N2 = 0
+
+ '   If sectionStartsCount = 0 Or sectionStartsCount <> sectionEndsCount Then
+        ''If there isn't a matching number of starting and ending brackets, add cell address to a message to be shown at the end, then skip to next cell
+'       exceptionMessage = exceptionMessage & vbCr & Cell.Address
+    
+'    Else
+    
+        ''For each 'section' (delimited by targetStart/End, make the font grey
+        While count < sectionStartsCount
+            count = count + 1
+            n = InStr(n + 1, cell.value, targetStart)
+            N2 = InStr(n + 1, cell.value, targetEnd)
+                
+            With cell.Characters(Start:=n, Length:=N2 - n + 1).Font
+                .Color = RGB(180, 180, 180)
+            End With
+
+        Wend
+
+'    End If
+
+Next cell
+
+If exceptionMessages <> "" Then
+    MsgBox "Some cells don't have matching {brackets} so weren't formatted ..." & vbCr & exceptionMessage
+'    Range("$B$8,$B$9").Select
+
+End If
+
+End Sub
+
+Sub groupRowsBasedOnIndentLevel()
+''Groups rows based on their indent level in column 1 of a table
+''** Add something to work out max grouping level, then collapse from right to left?
+
+Dim indentSteps
+indentSteps = 2     ''I.e. how many indents are added for each 'level
+
+TbSetup
+
+''Ungroup all
+
+Cells.Select
+For n = 1 To 10     ''Arbitrary number. Will error when can't ungroup further and jump to groupRows
+    On Error GoTo groupRows
+    Selection.Rows.Ungroup
+Next
+
+''Group again based on indent
+groupRows:
+'End " Enable this just to remove all grouping and not add again
+
+For Each c In tb.ListColumns(1).DataBodyRange.Cells
+
+    For n = 1 To c.IndentLevel / indentSteps
+        c.Rows.Group
+    Next
+
+Next
+
+'End
+
+ActiveSheet.Outline.ShowLevels RowLevels:=5
+ActiveSheet.Outline.ShowLevels RowLevels:=4
+ActiveSheet.Outline.ShowLevels RowLevels:=3
+ActiveSheet.Outline.ShowLevels RowLevels:=2
+'ActiveSheet.Outline.ShowLevels RowLevels:=1
+
+End Sub
+
+Sub ADOExport()
+
+  '* shades Epics/Features, but for some reason when copy/paste elsewhere doesn't retain (if shade manually it's fine)
+
+  Dim columnNamesToShow As Variant, lcHeaderName, titleNmb, colName
+  Dim lc As ListColumn, lcID As ListColumn, lcTitle As ListColumn, lcNew As ListColumn
+  Dim existingColumns As Object, columnExists As Boolean
+
+  '# Define columns to show (others will be hidden).  If they don't exist, will be ignored
+  columnNamesToShow = modConfig.GetAdoColumnNamesToShow()
+'  Debug.Print "ADOExport > columnNamesToShow: " & Join(columnNamesToShow, ", ")
+  
+  '# Turn the data into a table, and get its attributes
+  Application.Run "PERSONAL.XLSB!TbCreate"
+  'TbSetup
+
+  '# Freeze panes
+  With ActiveWindow
+      .SplitRow = 1
+      .SplitColumn = 3
+      .FreezePanes = True
+  End With
+
+
+  '# Insert ID and Title columns at the start
+  Set lcID = tb.ListColumns.Add(1)
+  lcID.Range.Cells(1).Formula2R1C1 = "ID"
+  
+  Set lcTitle = tb.ListColumns.Add(2)
+  lcTitle.Range.Cells(1).Formula2R1C1 = "Title"
+  
+  '# Add formula to ID column using the old one (will auto-rename to ID2) to create a link to ADO
+  lcID.DataBodyRange.Formula2R1C1 = "=HYPERLINK(""" & adoURL & """&[@ID2],[@ID2])"
+
+  '# Work out the biggest "Title column" (e.g. Title 3), then hide the original Title columns
+  For Each lc In tb.ListColumns
+    lcHeaderName = lc.Range(1)
+
+    If Left(lcHeaderName, 6) = "Title " Then
+      titleNmb = Right(lcHeaderName, 1)
+      lc.Range.EntireColumn.EntireColumn.Hidden = True
+    End If
+
+  Next
+
+  '# Make the Title column take the value from the relevant original Titles columns, then format it
+  With lcTitle.Range
+    .Cells(2, 1).Formula2R1C1 = "=TEXTJOIN("""",FALSE, " & tb.Name & "[@[Title 1]:[Title " & titleNmb & "]])"
+    .WrapText = True
+    .EntireColumn.ColumnWidth = 70
+    .EntireColumn.autoFit
+  End With
+
+
+  On Error Resume Next
+
+  '#  Shorten some column names
+  tb.ListColumns("Work Item Type").Range.Cells(1) = "Type"
+  tb.ListColumns("Requirements Priority").Range.Cells(1) = "Priority"
+
+  On Error GoTo 0
+
+
+'  '* Commented until need for something
+'  '# Add new column and formula.  For more columns: repeat with different formula name (i.e. column heading), and - optionally - a formula.
+'  Set lcNew = tb.ListColumns.Add
+'  lcNew.Range.Cells(1).Formula2R1C1 = "Example Formula"
+'  lcNew.DataBodyRange.Formula2R1C1 = "=LEFT([@Priority],1)"
+
+
+  '# Shade the epic/feature rows
+  tb.Range.AutoFilter field:=tb.ListColumns("Type").Range.Column, Criteria1:="=*Epic*", Operator:=xlAnd
+  With tb.DataBodyRange.Interior
+      .Pattern = xlSolid
+      .PatternColorIndex = xlAutomatic
+      .ThemeColor = xlThemeColorDark1
+      .TintAndShade = -0.349986266670736
+      .PatternTintAndShade = 0
+  End With
+  tb.DataBodyRange.Font.Bold = True
+  
+  tb.Range.AutoFilter field:=tb.ListColumns("Type").Range.Column, Criteria1:="=*Feature*", Operator:=xlAnd
+  With tb.DataBodyRange.Interior
+      .Pattern = xlSolid
+      .PatternColorIndex = xlAutomatic
+      .ThemeColor = xlThemeColorDark1
+      .TintAndShade = -0.149998474074526
+      .PatternTintAndShade = 0
+  End With
+  
+  ActiveSheet.ShowAllData
+
+
+  '# Hide everything before showing specified columns
+  tb.Range.EntireColumn.Hidden = True
+
+  '# Create a dictionary of existing column names, to use when showing columns below without throwing an error if they don't exist
+  Set existingColumns = CreateObject("Scripting.Dictionary")
+  For Each lc In tb.ListColumns
+      existingColumns.Add lc.Name, True
+  Next
+
+  '# Loop through each column name from the array at the start, checking it exists and then showing it
+  For Each colName In columnNamesToShow
+    If existingColumns.Exists(colName) Then
+      tb.ListColumns(colName).Range.EntireColumn.Hidden = False
+    End If
+  Next
+  
+  '#Reset height of all rows
+  Cells.EntireRow.autoFit
+
+End Sub
+
+
+Sub LogError(Optional ErrNum As Long = 0, Optional ErrDesc As String = "")
+  
+  Dim errMsg As String
+  errMsg = "Error " & ErrNum & ": " & ErrDesc
+  Debug.Print errMsg
+'  If ErrNum <> 0 Then MsgBox errMsg, vbCritical, "Error"       ' Instead of this, using standard one in error handler (so get Debug option)
+
+
+' ----------------------------------------------------------------------------------------
+'# Requires the 'On Error' line below at the start of a procedure, and the rest at the end
+' ----------------------------------------------------------------------------------------
+
+'  On Error GoTo ErrorHandler
+'
+'  Exit Sub '----------------------------------------------
+'
+'ErrorHandler:
+'  LogError Err.Number, Err.Description
+'  If Err.Number <> 0 Then
+'    ' Re-raise the error to show the built-in error dialog
+'    Err.Raise Err.Number
+'  End If
+
+
+End Sub
+
+
+Sub Word_CommentsFormatExportStart()
+      
+  '# If this is run from a blank sheet, will prompt with a list of open Word documents to get Comments from
+  If Application.WorksheetFunction.CountA(ActiveSheet.Cells) = 0 Then
+    Word_ImportCommentsToWorkbook '# (calls Word_CommentsFormatExport at the end)
+  
+  '# Or if there is a single table, will do a basic check that the first two columns are Person and Comment, then run the second part of formatting comments
+  ElseIf ActiveSheet.ListObjects.count = 1 Then
+    TbSetup
+    If tb.HeaderRowRange(1).value = "Person" And tb.HeaderRowRange(2).value = "Comment" Then
+      Word_CommentsFormatExport2
+    Else
+      Debug.Print "Word_CommentsFormatExportStart: Does not appear to be a Comments table, exiting procedure"
+    End If
+  Else
+      Debug.Print "Word_CommentsFormatExportStart: Does not appear to be an empty sheet or Comments table, exiting procedure"""
+  End If
+  
+End Sub
+
+
+Sub Word_ImportCommentsToWorkbook()
+
+  Const includeOnlyUnresolved As Boolean = True  '# True to skip resolved comments
+
+  Dim wdDoc As Object
+  Set wdDoc = Word_SelectOpenDocument()
+  If wdDoc Is Nothing Then Exit Sub
+
+  Dim xlWS As Worksheet
+  Set xlWS = ActiveSheet
+
+  '# Stop all procedures if no comments
+  If wdDoc.Comments.count = 0 Then
+    Debug.Print "Word_ImportCommentsToWorkbook: no comments in "; wdDoc.Name
+    End
+  End If
+
+  '# Write headers
+  With xlWS
+    .Range("A1:G1").value = Array("Person", "Comment", "Section", "Date", "Resolved", "Reply Count", "Type")
+    .Rows(1).Font.Bold = True
+  End With
+
+  Dim i As Long, r As Long
+  Dim c As Object  '# Word.Comment
+  Dim rowIndex As Long: rowIndex = 0
+  Dim dataArray() As Variant
+  ReDim dataArray(1 To 7, 1 To 1)  '# [col, row] — we’ll preserve and expand as needed. See further notes at the end
+
+  '# Loop through all comments in the Word doc
+  For i = 1 To wdDoc.Comments.count
+    Set c = wdDoc.Comments(i)
+
+    '# Skip replies - we will get them from .Replies instead
+    If Not c.Ancestor Is Nothing Then GoTo NextComment
+
+    '# Skip resolved comments if the flag is set
+    If includeOnlyUnresolved And c.Done Then GoTo NextComment
+
+    '# Add comment row
+    rowIndex = rowIndex + 1
+    ReDim Preserve dataArray(1 To 7, 1 To rowIndex)
+    dataArray(1, rowIndex) = c.Author
+    dataArray(2, rowIndex) = c.Range.Text
+    dataArray(3, rowIndex) = Word_GetNearestHeading(c.Scope)  '# Related Heading
+    dataArray(4, rowIndex) = c.Date
+    dataArray(5, rowIndex) = c.Done  '# Replies also have .Done
+    dataArray(6, rowIndex) = c.Replies.count
+    dataArray(7, rowIndex) = "Comment"
+
+    '# Add replies as additional rows
+    For r = 1 To c.Replies.count
+      rowIndex = rowIndex + 1
+      ReDim Preserve dataArray(1 To 7, 1 To rowIndex)
+      dataArray(1, rowIndex) = c.Replies(r).Author
+      dataArray(2, rowIndex) = ">> " & c.Replies(r).Range.Text  '# Prefix with ">>"
+'      dataArray(3, rowIndex) = Word_GetNearestHeading(c.Replies(r).Scope)  '# Related Heading (always the same, so unnecessary)
+      dataArray(3, rowIndex) = " "
+      dataArray(4, rowIndex) = c.Replies(r).Date
+      dataArray(5, rowIndex) = c.Replies(r).Done  '# Likely same as parent
+      dataArray(6, rowIndex) = c.Replies(r).Replies.count  '# Likely always 0
+      dataArray(7, rowIndex) = "Reply"
+    Next r
+
+NextComment:
+  Next i
+
+  '# Transpose to write in one go (Excel expects row then column)
+  If rowIndex > 0 Then
+    Dim finalArray() As Variant
+    ReDim finalArray(1 To rowIndex, 1 To 7)
+    Dim col As Long, row As Long
+    For col = 1 To 7
+      For row = 1 To rowIndex
+        finalArray(row, col) = dataArray(col, row)
+      Next row
+    Next col
+
+    xlWS.Range("A2").Resize(rowIndex, 7).value = finalArray
+  End If
+
+  xlWS.Columns.autoFit
+
+  Call Word_CommentsFormatExport(includeOnlyUnresolved)
+
+  '#NB: typically Excel does arrays as rows/columns. We had issues with how Excel VBA treats ReDim Preserve on both dimensions of a 2D array
+    '# so instead this uses a "column then row" array first (dataArray), then transposes to finalArray (row then column) before writing the output
+
+End Sub
+
+Function Word_SelectOpenDocument() As Object
+  '# Returns a Word.Document object selected by the user from open Word documents
+
+  Dim wdApp As Object
+  On Error Resume Next
+  Set wdApp = GetObject(, "Word.Application")
+  On Error GoTo 0
+
+  If wdApp Is Nothing Then
+    MsgBox "Word is not open.", vbExclamation
+    Exit Function
+  End If
+
+  If wdApp.Documents.count = 0 Then
+    MsgBox "No Word documents are open.", vbExclamation
+    Exit Function
+  End If
+
+  Dim docList As String
+  Dim i As Long
+  For i = 1 To wdApp.Documents.count
+    docList = docList & i & ": " & wdApp.Documents(i).Name & vbCrLf
+  Next i
+
+  Dim docIndex As Variant
+  docIndex = InputBox("Choose a Word document by number:" & vbCrLf & vbCrLf & docList, "Select Word Doc")
+
+  If Not IsNumeric(docIndex) Then Exit Function
+  Dim docNum As Long: docNum = CLng(docIndex)
+
+  If docNum < 1 Or docNum > wdApp.Documents.count Then Exit Function
+
+  Set Word_SelectOpenDocument = wdApp.Documents(docNum)
+End Function
+
+
+Function Word_GetNearestHeading(rng As Object) As String
+  '# Used in Word_ImportCommentsToWorkbook to get the nearest parent heading (including numbering if applicable)
+  Dim para As Object
+  Dim headingText As String
+
+  On Error Resume Next
+  Set para = rng.Paragraphs(1)
+
+  Do While Not para Is Nothing
+    If para.Style Like "Heading *" Then
+      headingText = para.Range.ListFormat.ListString & " " & para.Range.Text
+      headingText = Trim(Replace(headingText, vbCr, ""))  '# Clean trailing line breaks
+      Exit Do
+    End If
+    Set para = para.Previous
+  Loop
+
+  If headingText = "" Then
+    Word_GetNearestHeading = "-"
+  Else
+    Word_GetNearestHeading = headingText
+  End If
+End Function
+
+
+
+Sub Word_CommentsFormatExport(includeOnlyUnresolved As Boolean)
+  '# Called from Word_ImportCommentsToWorkbook.
+    '# includeOnlyUnresolved is set there in code (True to skip resolved comments).  If False, then the end below will filter to resolved comments and select all ready to delete
+
+  TbCreate
+  'TbSetup
+  
+  TbCol("Date").Range.HorizontalAlignment = xlLeft
+  TbCol("Reply Count").Range.HorizontalAlignment = xlLeft
+  
+  Call LcCreate("Reply Count2", , "=IF([@Type]=""Comment"",[@[Reply Count]],R[-1]C)", True)
+  Call LcCreate("Original Person", , "=IF([@Type]=""Comment"",[@Person],R[-1]C)", True)
+  Call LcCreate("Action Required", , "=IF([@Type]=""Comment"",IF([@[Reply Count]]=0,""zAUTHOR"",[@[Original Person]]),R[-1]C)", True)
+
+  TbCol("Person").Range.ColumnWidth = 20
+  TbCol("Comment").Range.ColumnWidth = 100
+  TbCol("Comment").DataBodyRange.WrapText = True
+  Cells.EntireRow.autoFit
+  tb.ShowTableStyleRowStripes = False
+  
+  Call Word_CommentsSortAndFormat
+  
+  If includeOnlyUnresolved = False Then
+  
+    '# Filter to TRUE, ready to delete resolved comments (VBA gives an error deleting non-continuous filtered rows)
+    tb.Range.AutoFilter field:=TbCol("Resolved").Range.Column, Criteria1:="TRUE"
+      
+    If Application.WorksheetFunction.Subtotal(103, tb.ListColumns(1).DataBodyRange) > 0 Then
+      '# Won't work
+      'tb.DataBodyRange.SpecialCells(xlCellTypeVisible).EntireRow.Delete
+      'TbFilterClear
+          
+      '# Alternate option ready to delete manually (only seems to work if select table rows, not entire row)
+      tb.DataBodyRange.SpecialCells(xlCellTypeVisible).Select
+    End If
+    
+  End If
+  
+End Sub
+
+Sub Word_CommentsFormatExport2()
+
+  Dim c As Range
+  Dim lr As ListRow
+  Dim newRow As ListRow
+  
+  TbSetup
+  
+  '# Sort first time as may have manually marked some as 'AUTHOR'
+  Word_CommentsSortAndFormat
+  
+  '# Create a new temporary column to see if Action Required is the same in the previous row
+  LcCreate "TEMP", , "=[@[Action Required]]=R[-1]C[-1]", True
+
+  Dim i As Long
+  For i = tb.ListRows.count To 1 Step -1  '# I.e. loop backwards through listrows
+    Set lr = tb.ListRows(i)
+    Set c = TbCellRng(lr, "TEMP")
+    
+    '# If Action Required wasn't the same in the previous row, insert a new header row (effectively section header) for that person
+    If c.value = False Then
+      lr.Range.EntireRow.Insert
+      Set newRow = tb.ListRows(i)           '# newly inserted row
+      Set lr = tb.ListRows(i + 1)           '# shifted-down row with source data
+
+      '# Copy "Action Required" value from old row to new row fields
+      Dim val As String
+      val = TbCellRng(lr, "Action Required").value
+
+      TbCellRng(newRow, "Comment").value = val
+      TbCellRng(newRow, "Original Person").value = Replace(val, "zAUTHOR", "aaaa")
+      TbCellRng(newRow, "Action Required").value = val
+    End If
+  Next
+
+  '# Sort again
+  Word_CommentsSortAndFormat
+
+End Sub
+
+
+Sub Word_CommentsSortAndFormat()
+
+  Dim lr As ListRow
+  
+  TbSort "Action Required", , "Original Person"
+  
+  For Each lr In tb.ListRows
+    Debug.Print "TEMP Word_CommentsSortAndFormat lr.Index: " & lr.Index
+    
+    Select Case TbCellVal(lr, "Type")
+    
+      Case "Comment"
+        LrSetBorder lr, xlEdgeTop, , rgbGray
+      
+      Case "Reply"
+        LrSetBorder lr, , , , True
+        lr.Range.Font.Color = RGB(111, 111, 111)
+            
+      Case ""
+        LrSetBorder lr, xlEdgeTop, xlMedium
+      
+        With lr.Range.Font
+          .Size = 12
+          .Bold = True
+        End With
+        
+        '# Caters for row being inserted under the header which means it needs to have the shading removed
+        With lr.Range.Interior
+          .Pattern = xlNone
+          .TintAndShade = 0
+          .PatternTintAndShade = 0
+        End With
+        
+      Case Else
+          
+    End Select
+    
+  Next
+
+End Sub
+
+
+Sub sbGetQueryContentOLD()
+
+'# Can't use because SpecialCells doesn't stick with columns then rows if hidden column
+
+'# Turn a table into (part of) SQL query based on visible columns and rows
+
+Dim cRow, rowVals, outputVals, headerRow As Boolean
+
+TbSetup
+
+For Each c In tb.Range.SpecialCells(xlCellTypeVisible)
+  'Debug.Print c.Address
+
+  If cRow <> c.row Then '# new row
+
+    If cRow = "" Then
+      headerRow = True
+    Else
+      headerRow = False
+      '# Add a line, remove the last 2 chars ... i.e. the final ", " ... and add ")," at the end
+      outputVals = outputVals + vbLf + Left(rowVals, Len(rowVals) - 2) & "),"
+    End If
+
+    '# Start new line
+    rowVals = ""
+    rowVals = "(" & sbCellOutput(c, headerRow) & ", "
+    cRow = c.row
+
+  Else  '# same row
+
+    rowVals = rowVals & sbCellOutput(c, headerRow) & ", "
+
+  End If
+
+
+Next
+Exit Sub
+'# Final row
+outputVals = outputVals + vbLf + Left(rowVals, Len(rowVals) - 2) & "),"
+
+
+'# Copy to clipboard (needs Tools > References: Forms 2.0 Object Library ticked)
+With New DataObject
+    .SetText outputVals
+    .PutInClipboard
+End With
+
+
+End Sub
+Sub sbGetQueryContent()
+
+'# Turn a table into (part of) SQL query based on visible columns and rows
+
+Dim cRow, rowVals, outputVals, headerRow As Boolean
+Dim rw As ListRow, col As ListColumn
+
+TbSetup
+
+cRow = ""  '# Initialize cRow to detect first row
+
+'# --- Process header row ---
+rowVals = ""
+headerRow = True
+For Each col In tb.ListColumns
+    If Not col.Range.EntireColumn.Hidden Then
+        rowVals = rowVals & sbCellOutput(col.Range.Cells(1, 1), headerRow) & ", "
+    End If
+Next col
+
+'# Add header row to output
+If Len(rowVals) > 0 Then
+    rowVals = "(" & Left(rowVals, Len(rowVals) - 2) & ")"
+    outputVals = rowVals
+End If
+
+'# --- Loop through table data rows ---
+headerRow = False
+For Each rw In tb.ListRows
+    rowVals = ""
+    For Each col In tb.ListColumns
+        If Not col.Range.EntireColumn.Hidden Then
+            rowVals = rowVals & sbCellOutput(rw.Range.Cells(1, col.Index), headerRow) & ", "
+        End If
+    Next col
+    
+    '# Skip adding empty rows (e.g. only hidden columns)
+    If Len(rowVals) > 0 Then
+        rowVals = "(" & Left(rowVals, Len(rowVals) - 2) & ")"
+        outputVals = outputVals & vbLf & rowVals & ","
+    End If
+Next rw
+
+'# Copy to clipboard (needs Tools > References: Forms 2.0 Object Library ticked)
+With New DataObject
+    .SetText outputVals
+    .PutInClipboard
+End With
+
+End Sub
+
+
+Function sbCellOutput(c, headerRow As Boolean)
+
+If headerRow = True Then
+  
+  sbCellOutput = c
+
+Else
+  If c.value = "" Then
+    sbCellOutput = "NULL"
+  ElseIf IsNumeric(c.value) Then
+    sbCellOutput = c
+  Else
+    sbCellOutput = "'" & c & "'"
+  End If
+
+End If
+
+End Function
+
+Sub sbGenerateUpdateSQL_Dynamic()
+'# Generates SQL UPDATE ... CASE from visible table columns, with flexible ID and target column
+
+'# NB: use and 'id' column and another column defined in targetColName below
+'# I.e. isn't like the other one that goes off visible rows/columns
+
+Dim rw As ListRow, col As ListColumn
+Dim tblName As String, idColName As String, targetColName As String
+Dim idVal As String, targetVal As String
+Dim sql As String
+Dim rowVals As String
+
+'# --- Configuration: set the column names -----------------------------------
+tblName = "players"
+idColName = "id"       '# change this to your ID column
+targetColName = "rank" '# change this to whichever column you want to update
+'# ---------------------------------------------------------------------------
+
+TbSetup
+
+sql = "UPDATE " & tblName & vbCrLf & "SET " & targetColName & " = CASE " & idColName & vbCrLf
+rowVals = ""
+
+'# Loop through table rows
+For Each rw In tb.ListRows
+    '# Skip hidden rows
+    If rw.Range.EntireRow.Hidden = False Then
+        idVal = ""
+        targetVal = ""
+        
+        '# Loop visible columns to find ID and target values
+        For Each col In tb.ListColumns
+            If Not col.Range.EntireColumn.Hidden Then
+                If col.Name = idColName Then
+                    idVal = rw.Range.Cells(1, col.Index).value
+                ElseIf col.Name = targetColName Then
+                    'targetVal = rw.Range.Cells(1, col.Index).Value
+                    targetVal = sbCellOutput(rw.Range.Cells(1, col.Index), False)
+                End If
+            End If
+        Next col
+        
+        '# Only include if both values exist (skip blank target)
+        If Trim(targetVal & "") <> "" And Trim(idVal & "") <> "" Then
+            sql = sql & "  WHEN " & idVal & " THEN " & targetVal & vbCrLf
+            rowVals = rowVals & idVal & ", "
+        End If
+    End If
+Next rw
+
+'# Finish SQL statement
+sql = sql & "END" & vbCrLf
+sql = sql & "WHERE " & idColName & " IN (" & Left(rowVals, Len(rowVals) - 2) & ");"
+
+'# Copy to clipboard
+With New DataObject
+    .SetText sql
+    .PutInClipboard
+End With
+
+'MsgBox "SQL UPDATE copied to clipboard!"
+End Sub
+
+
+
+Sub zGeneralNotes()
+
+''Use `Set` to assign an object reference to a variable
+
+''In Intermediate window (Ctrl+G):
+    ''? is the same as Debug.Print, e.g. type the following directly in the window then press Enter
+        '?ActiveWorkbook.Sheets.Count
+    ''when typing directly, can only do one line, but can write multiline code like this (either using `?` or `Debug.Print` or my own `dP`). I.e. `:` indicates a new line
+        'For Each s In ActiveWorkbook.Sheets: Print s.Name: Next
+
+End Sub
+
+
+Sub zUsefulFormulas()
+ 
+'ActiveSheet.ListObjects(1).ListColumns("Category").Index
+ 
+'=IF([@ColName]="","",VLOOKUP([@ColName],tblName,COLUMN(tblName[[#Headers],[ColNameInOther]]),FALSE))
+ 
+'''https://www.excel-university.com/use-the-column-header-to-retrieve-values-from-an-excel-table/
+'=IF([@Name]="","",VLOOKUP([@Name],tblBlah,COLUMN(INDEX(tblBlah,,MATCH(AM$1,tblBlah[#Headers],0))),FALSE))
+ 
+'''https://www.excelcampus.com/functions/index-match-formula/
+'''(in the following example, Email Address is the column range I'm returning, Name is the cell in this I look up, the second Name is the column I look it up from
+'=IFNA(INDEX(tblOther[ColumnToReturn],MATCH([@ThisCol],tblOther[ColThatMatchesThisCol],0)),"")
+ 
+ 
+'''Find the string up to a delimiter
+'LEFT(A1, FIND("|",A1)-1)
+ 
+ 
+'Instead of referring to a table column like this...
+'tblName [column1]
+'can use this (i.e. column 'column1' = column A), which can then fill right without being stuck referring to the same column
+'INDEX(tblName,,MATCH(A$1,tblName[#Headers],0))
+'e.g.
+'=MAX(INDEX(tblName,,MATCH(A$1,tblName[#Headers],0)))
+ 
+'Allows using the header to work out which
+'=IFNA(INDEX(INDEX(tblBlah,,MATCH(L$1,tblBlah[#Headers],0)),MATCH([@Name],tblBlah[Name],0)),"")
+ 
+'''Combined with earlier one to get
+'=INDEX(INDEX(tblBlah,,MATCH(AN$1,tblBlah[#Headers],0)),MATCH([@Name],tblBlah[Name],0))
+ 
+ 
+'** Haven't quite finished working this out, but 1 = row number, A$1 = header cell, can then get the specific cell
+'=INDEX(tblName,1,MATCH(A$1,tblName[#Headers],0))
+ 
+ 
+'''Table references in VBA
+'''https://exceloffthegrid.com/vba-excel-tables-code/
+ 
+End Sub
+
+Sub zUsefulCode()
+
+'# prefix every cell ---------------------------------------
+For Each c In Selection
+    c.value = "abc: + c.Value"
+Next
+
+'# make changes within visible cells only -------------------
+For Each c In Selection.SpecialCells(xlCellTypeVisible).Cells
+Next
+
+End Sub
+
+Sub zzParametersExampleA()
+
+'''Example of passing an optional parameter to zzParametersExampleB
+
+Call zzParametersExampleB("Blah")
+Call zzParametersExampleB
+
+End Sub
+
+Sub zzParametersExampleB(Optional ByRef myParameter As String)
+
+Debug.Print myParameter
+
+End Sub
+
+Sub zKeyboardShortcuts()
+
+''Doesn't actually run, just kept uncommented for ease of jumping to actual procedures from here (Shift+F2)
+End '-----------------------
+
+currentMacro            ''Ctrl+q
+filterTableCommon       ''Ctrl+e
+filterTableclearFirst   ''Ctr1+Shift+E
+goToPrompt              ''Ctr1+g
+goToPrompt2             ''Ctr1+Shift+G
+macrosList              ''Ctrl+m
+TbCreate             ''Ctrl+t
+
+magicMacro      ''??
+pasteValue      ''??
+
+End Sub
+

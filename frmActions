@@ -88,11 +88,11 @@ End Sub
 Private Sub TextBox1_Change()
   
   '# Check if the key exists in the dictionary (i.e. if the textbox value matches one of the predefined options from MacroOptions)
-  If macrosDict.Exists(TextBox1.value) Then
+  If macrosDict.exists(TextBox1.Value) Then
     
     '# set macroName and macroParameter so they can be used by calling macro (NB: these variables were defined above as Public)
-    macroName = macrosDict(TextBox1.value)(1) ' Macro name
-    macroParameter = macrosDict(TextBox1.value)(2) ' Parameter (can be Null)
+    macroName = macrosDict(TextBox1.Value)(1) ' Macro name
+    macroParameter = macrosDict(TextBox1.Value)(2) ' Parameter (can be Null)
       
     Me.Hide
   

@@ -1,0 +1,699 @@
+'# frmSelect
+Option Explicit
+Public itemsArray As Variant, filteredArray As Variant, resultType As String, selectedItem As Object, selectedCell As Range, parentWorkbook As Workbook, parentWorksheet As Worksheet
+
+Private Sub proceduresIndex()
+
+  '# For Shift + F2, Ctrl + Shift + F2.  I.e. a list to jump to easily since VBA and VS Code don't manage it well
+  Exit Sub '------------------------
+  
+  UserForm_Initialize '# Built-in procedure for when form loads
+  InitializeForm      '# Custom version that can pass parameters to
+  UserForm_KeyPress   '# Keyboard shortcuts when first display form (e.g. when press 's' to get sheets)
+  TextBox1_KeyDown
+  TextBox1_Change     '# Filter the ListBox. If there is only a single match, and a number was entered, activates that item
+  ListBox1_Enter      '# Sets the focus back in the textbox so can keep typing
+  ListBox1_DblClick   '# Calls GetSelectedListItem
+  DisplayInputFields  '# Show textbox, listbox (if applicable), etc.  And set the label caption
+  ListWorkbooks       '# Populate the listbox, including selecting a default
+  ListSheets          '# as above
+  ListColumns         '# as above
+  FilterArray
+  FindItemIndex
+  GetSelectedListItem
+  GetSelectedCell
+  GetSelectedID
+  GetPrevious
+  
+  '# modDK:
+  GetWorkbooks
+  GetSheets
+  GetColumns
+
+End Sub
+
+Private Sub UserForm_Initialize()
+  '# Called automatically when form loaded into memory (before it is shown). Can't pass parameters to it
+  '# NB: is also used by UserForm_KeyPress, so care when adding anything here in case it affects that
+  
+  With Me
+    .Width = 300
+    .Height = 400
+  End With
+
+  With Label1
+    .Left = 10
+    .Top = 10
+    .Width = Me.Width - 30
+    .Height = 200
+    .Visible = True
+    .Font = "Segoe UI"
+    .Caption = "Select an option: " & vbNewLine & vbNewLine & _
+      "w:" & vbTab & "Workbook" & vbNewLine & _
+      "s:" & vbTab & "workSheet" & vbNewLine & _
+      "c:" & vbTab & "Column" & vbNewLine & _
+      "r:" & vbTab & "cell Ref" & vbNewLine & _
+      "d:" & vbTab & "Date" & vbNewLine & _
+      "i:" & vbTab & "ID" & vbNewLine & _
+      ""
+  End With
+
+  With TextBox1
+    .Left = 10
+    .Top = Label1.Top + Label1.Height
+    .Width = Me.Width - 30
+    .Font = "Segoe UI"
+    .Visible = False    ' So initial keypress event will work
+  End With
+
+  With ListBox1
+    .Left = TextBox1.Left
+    .Width = TextBox1.Width
+    .Top = TextBox1.Top + TextBox1.Height
+    .Height = 300
+    .Font = "Segoe UI"
+    .Visible = False    ' So initial keypress event will work
+  End With
+
+End Sub
+
+Public Sub InitializeForm(frmCaption As String, Optional initialResultType As String = "", Optional ByVal initialItemsArray As Variant = Empty, Optional parentWorkbook As Workbook, Optional parentWorksheet As Worksheet)
+  '# Custom of my own, called from calling module (TO DO)
+  
+  Dim sheetsCollection As Collection, columnsCollection As Collection
+  
+  Me.Caption = frmCaption
+  
+  Me.resultType = initialResultType
+  
+'  Debug.Print "frmSelect > InitializeForm > IsEmpty(initialItemsArray): " & IsEmpty(initialItemsArray)
+'  Debug.Print "frmSelect > InitializeForm > Me.resultType: " & Me.resultType
+ 
+  If IsEmpty(initialItemsArray) Then
+      
+    Select Case Me.resultType
+    
+      Case "Workbook"
+        Me.itemsArray = GetWorkbooks()
+  '      Debug.Print "InitializeForm > Me.itemsArray 0 & 1: "; Me.itemsArray(0).Name; ", "; Windows(Me.itemsArray(0).Name).Visible; ". "; Me.itemsArray(1).Name; ", "; Windows(Me.itemsArray(1).Name).Visible
+      Case "Worksheet"
+        Set sheetsCollection = GetSheets()
+        Me.itemsArray = sheetsCollection("SheetsArray")
+      '  Set parentWorkbook = sheetsCollection("ParentWorkbook")      'Not relevant when pass nothing to GetSheets?
+      Case "Column"
+        Set columnsCollection = GetColumns()
+        Me.itemsArray = columnsCollection("ColumnsArray")
+      '  Set parentWorksheet = sheetsCollection("ParentWorksheet")      'Not relevant when pass nothing to GetColumnss?
+        
+    End Select
+
+  Else
+    Me.itemsArray = initialItemsArray
+  End If
+  
+      
+  Select Case Me.resultType
+  
+    Case "Workbook"
+      Call ListWorkbooks  '>>
+      Call DisplayInputFields '>>
+      
+    Case "Worksheet"
+      Call ListSheets  '>>
+      Call DisplayInputFields '>>
+      
+    Case "Column"
+      Call ListColumns  '>>
+      Call DisplayInputFields '>>
+      
+    Case "Cell"
+      Call DisplayInputFields '>>
+    
+    Case "ID"
+      Call DisplayInputFields '>>
+      
+  End Select
+  
+  
+''  'TEMP ************
+'    With TextBox1
+'        .Text = ""  ' Reset the TextBox to an empty string (if needed).
+'        .SetFocus    ' Ensure the TextBox is focused when the form loads.
+'    End With
+''  'TEMP ************
+  
+
+
+End Sub
+
+Private Sub UserForm_KeyPress(ByVal KeyAscii As MSForms.ReturnInteger)
+  '# only triggered when focus is on the form itself (i.e. no specific control, e.g. a TextBox, has focus).
+  '# used for the keyboard shortcuts when first open the form (if no choice was already passed in)
+  
+  'Debug.Print KeyAscii
+
+  Select Case Chr(KeyAscii)
+    Case "w"
+      Call InitializeForm(Me.Caption, "Workbook")
+    Case "s"
+      Call InitializeForm(Me.Caption, "Worksheet")
+    Case "c"
+      Call InitializeForm(Me.Caption, "Column")
+    Case "r"
+      Call InitializeForm(Me.Caption, "Cell")
+    Case "i"
+      Call InitializeForm(Me.Caption, "ID")
+    Case Else
+      If KeyAscii = 27 Then   'Esc
+        Me.resultType = ""
+        Me.Hide
+      End If
+      Exit Sub
+  End Select
+  
+'  Debug.Print "frmSelect > UserForm_KeyPress: KeyAscii: " & KeyAscii
+  KeyAscii = 0    ''Cancels initial keypress so it doesn't appear in the textbox
+
+End Sub
+
+Private Sub TextBox1_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)
+
+  Dim goToType, goToValue, selectedIndex As Long
+
+  Select Case KeyCode
+  
+    Case 13 '# Enter. 'Submit' the form
+            
+      Select Case Me.resultType
+  
+        Case "Cell"
+          Call GetSelectedCell '>>
+        
+        Case "ID"
+          Call GetSelectedID '>>
+        
+        Case Else
+          Call GetSelectedListItem '>>
+    
+      End Select
+
+        
+    '# The following cases move the listbox selection while keeping the focus on the textbox
+    
+    Case 33 '# Page up
+    
+      ''NB: the 'jump' is hard coded here, might be a better way to work out the length of the listbox
+      ListBox1.Selected(WorksheetFunction.Max(ListBox1.ListIndex - 11, 0)) = True
+      TextBox1.SetFocus
+    
+    Case 34 '# Page down
+    
+      ''NB: the 'jump' is hard coded here, might be a better way to work out the length of the listbox
+      ListBox1.Selected(WorksheetFunction.Min(ListBox1.ListIndex + 11, ListBox1.ListCount - 1)) = True
+      TextBox1.SetFocus
+    
+'    Case 35 '# End    DISABLED SO CAN STILL USE IN TEXT BOX ITSELF
+'
+'      ListBox1.Selected(ListBox1.ListCount - 1) = True
+'      TextBox1.SetFocus
+'
+'    Case 36 '# Home   DISABLED SO CAN STILL USE IN TEXT BOX ITSELF
+'
+'      ListBox1.Selected(0) = True
+'      TextBox1.SetFocus
+   
+    Case 38 '# Up arrow
+    
+      If ListBox1.ListIndex > 0 Then
+        ListBox1.Selected(ListBox1.ListIndex - 1) = True
+        TextBox1.SetFocus
+      End If
+    
+    Case 40 '# Down arrow
+      
+      If ListBox1.ListIndex + 1 < ListBox1.ListCount Then
+        ListBox1.Selected(ListBox1.ListIndex + 1) = True
+        TextBox1.SetFocus
+      End If
+    
+    
+    '# Esc (close the form)
+    Case 27
+        
+        Me.resultType = ""
+        Me.Hide
+    
+    Case 192 '# backtick key (to go back to the previous Workbook, Worksheet or Column
+        Call GetPrevious '>>
+    
+    Case Else
+        
+End Select
+
+End Sub
+
+Private Sub TextBox1_Change()
+  '# Used to filter the listbox.  Then, if a number is entered and there is only 1 match, activates selecting that item
+
+  If Me.resultType = "Workbook" Then
+    Call ListWorkbooks '>>
+  ElseIf Me.resultType = "Worksheet" Then
+    Call ListSheets '>>
+  ElseIf Me.resultType = "Column" Then
+    Call ListColumns '>>
+  End If
+  
+  If ListBox1.ListCount = 1 And IsNumeric(TextBox1.Text) Then
+    GetSelectedListItem
+  End If
+  
+End Sub
+
+Private Sub ListBox1_Enter()
+
+  '# Ensures the focus always stays in the textbox so you can keep typing
+  TextBox1.SetFocus
+
+End Sub
+
+Private Sub ListBox1_DblClick(ByVal Cancel As MSForms.ReturnBoolean)
+
+  Call GetSelectedListItem '>>
+
+End Sub
+
+Sub DisplayInputFields()
+  '# Show textbox, listbox (if applicable), etc.  And set the label caption
+   
+  'Debug.Print "frmSelect > DisplayInputFields: procedure running"
+  
+  With Label1
+    .Height = 20
+    .Caption = Me.resultType & ":"
+  End With
+  
+  With TextBox1
+    .Visible = True
+    .SetFocus
+    .Top = Label1.Top + Label1.Height
+  End With
+  
+  If Me.resultType = "Workbook" Or Me.resultType = "Worksheet" Or Me.resultType = "Column" Then
+    ListBox1.Top = TextBox1.Top + TextBox1.Height
+    ListBox1.Visible = True
+        
+  End If
+
+End Sub
+
+ 
+
+Sub ListWorkbooks()
+  Dim filteredArray As Variant
+  Dim i As Long, selectedIndex As Long
+  Dim itemName As String
+  Dim itemIndex As Long
+
+  ' Step 1: Get the filtered array and store it in the form's property
+  Me.filteredArray = FilterArray(Me.itemsArray, TextBox1.Value)
+  filteredArray = Me.filteredArray
+
+  With ListBox1
+    .Clear
+    selectedIndex = -1
+
+    ' Step 2: Populate the ListBox using the filtered array
+    For i = LBound(filteredArray) To UBound(filteredArray)
+      itemIndex = FindItemIndex(Me.itemsArray, filteredArray(i))  'I.e. use the function to get the current item's index
+
+      ' Generate the item display name with the original index as the prefix
+      If Windows(filteredArray(i).Name).Visible = True Then
+        itemName = itemIndex & ". " & filteredArray(i).Name
+      Else
+        itemName = "* " & itemIndex & ". " & filteredArray(i).Name
+      End If
+
+      .AddItem itemName
+
+      ' Check if this item is the active one
+      If filteredArray(i).Name = ActiveWorkbook.Name Then
+        selectedIndex = .ListCount - 1 ' Match the index in the ListBox
+      End If
+
+    Next i
+
+    '# Step 3: Set the selected/default option.  NB: for a while I was just selecting the first (see under this), gone back to current though
+    If Trim(TextBox1.Text) = "" Then
+      ' If the textbox is empty, use selectedIndex (i.e. the active item)
+      If selectedIndex >= 0 Then
+        .ListIndex = selectedIndex
+      Else
+        .ListIndex = 0
+      End If
+
+    Else
+      ' If the textbox is not empty, select the first item
+      If .ListCount > 0 Then
+        .ListIndex = 0
+      End If
+    End If
+
+    
+    ' Step 3: Set the selected/default option to the first in the list
+'      .ListIndex = 0
+    
+    
+  End With
+  
+End Sub
+Sub ListSheets()
+  
+  On Error GoTo ErrorHandler
+
+  Dim filteredArray As Variant
+  Dim i As Long, selectedIndex As Long
+  Dim itemName As String
+  Dim itemIndex As Long
+  
+  '* NB: Next 3 lines were disabled at one point.  Related to using form for other purposes? But then only selects first sheet every time (as it skips `If Not parentWorkbook Is Nothing...`)
+  If parentWorkbook Is Nothing Then
+    Set parentWorkbook = ActiveWorkbook
+  End If
+  
+'  Debug.Print "IsArrayPopulated(Me.itemsArray): "; IsArrayPopulated(Me.itemsArray)
+'  Debug.Print "me.itemsArray(0).name: "; Me.itemsArray(0).Name
+  If IsArrayPopulated(Me.itemsArray) = True Then
+  
+    ' Step 1: Get the filtered array and store it in the form's property
+    Me.filteredArray = FilterArray(Me.itemsArray, TextBox1.Value)
+    filteredArray = Me.filteredArray
+  
+    With ListBox1
+      .Clear
+      selectedIndex = -1
+  
+      ' Step 2: Populate the ListBox using the filtered array
+      For i = LBound(filteredArray) To UBound(filteredArray)
+        itemIndex = FindItemIndex(Me.itemsArray, filteredArray(i))  'I.e. use the function to get the current item's index
+  
+        ' Generate the item display name with the original index as the prefix
+        If filteredArray(i).Visible = True Then
+          itemName = itemIndex & ". " & filteredArray(i).Name
+        Else
+          itemName = "* " & itemIndex & ". " & filteredArray(i).Name
+        End If
+  
+        .AddItem itemName
+  
+        If Not parentWorkbook Is Nothing Then
+            ' Check if this item is the active one
+          If filteredArray(i).Name = ActiveSheet.Name Then
+            selectedIndex = .ListCount - 1 ' Match the index in the ListBox
+          End If
+          
+        End If
+  
+      Next i
+  
+      ' Step 3: Set the selected/default option
+      If Trim(TextBox1.Text) = "" Then
+        '# If the textbox is empty, use selectedIndex (i.e. the active item)
+        If selectedIndex >= 0 Then
+          .ListIndex = selectedIndex
+        Else
+          .ListIndex = 0
+        End If
+        
+      Else
+        ' If the textbox is not empty, select the first item
+        If .ListCount > 0 Then
+          .ListIndex = 0
+        End If
+      End If
+      
+    End With
+  
+    Exit Sub
+    
+    
+  Else  '# Array not populated
+  
+  End If
+
+ErrorHandler:
+  LogError Err.Number, Err.Description
+  If Err.Number <> 0 Then
+    ' Re-raise the error to show the built-in error dialog
+    Err.Raise Err.Number
+  End If
+  
+End Sub
+
+
+
+Sub ListColumns()
+  Dim filteredArray As Variant
+  Dim i As Long, selectedIndex As Long
+  Dim itemName As String
+  Dim itemIndex As Long
+    
+  ' Step 1: Get the filtered array and store it in the form's property
+  Me.filteredArray = FilterArray(Me.itemsArray, TextBox1.Value)
+  filteredArray = Me.filteredArray
+
+  With ListBox1
+    .Clear
+    selectedIndex = -1
+
+    ' Step 2: Populate the ListBox using the filtered array
+    For i = LBound(filteredArray) To UBound(filteredArray)
+      itemIndex = FindItemIndex(Me.itemsArray, filteredArray(i))  'I.e. use the function to get the current item's index
+
+      ' Generate the item display name with the original index as the prefix
+      If filteredArray(i).Range.EntireColumn.Hidden = False Then
+        itemName = itemIndex & ". " & filteredArray(i).Name
+      Else
+        itemName = "* " & itemIndex & ". " & filteredArray(i).Name
+      End If
+
+      .AddItem itemName
+
+      If Not parentWorkbook Is Nothing Then
+        ' Check if this item is the active one
+        If filteredArray(i).Name = tb_ActiveCellColName Then
+          selectedIndex = .ListCount - 1 ' Match the index in the ListBox
+        End If
+      End If
+      
+    Next i
+
+    ' Step 3: Set the selected/default option
+    If Trim(TextBox1.Text) = "" Then
+      ' If the textbox is empty, use selectedIndex (i.e. the active item)
+      If selectedIndex >= 0 Then
+        .ListIndex = selectedIndex
+      Else
+        .ListIndex = 0
+      End If
+      
+    Else
+      ' If the textbox is not empty, select the first item
+      If .ListCount > 0 Then
+        .ListIndex = 0
+      End If
+    End If
+    
+  End With
+  
+End Sub
+
+
+Private Function FilterArray(ByVal originalArray As Variant, ByVal filterValue As String) As Variant
+  Dim interimArray() As Variant
+  Dim i As Long, count As Long
+  Dim itemDisplayName As String
+
+  ' Initialize interim array as empty
+  interimArray = Array()
+  count = -1
+
+  ' Filter items
+  For i = LBound(originalArray) To UBound(originalArray)
+    ' Create the display name for filtering
+    itemDisplayName = (i + 1) & ". " & originalArray(i).Name
+
+    If InStr(1, itemDisplayName, filterValue, vbTextCompare) > 0 Then
+      count = count + 1
+      If count = 0 Then
+        ReDim interimArray(0 To 0)
+      Else
+        ReDim Preserve interimArray(0 To count)
+      End If
+      Set interimArray(count) = originalArray(i)
+    End If
+  Next i
+
+  ' Return the filtered array
+  If count = -1 Then
+    FilterArray = Array() ' Return empty array if no matches
+  Else
+    FilterArray = interimArray
+  End If
+End Function
+
+Private Function FindItemIndex(ByVal originalArray As Variant, ByVal item) As Long
+  '# Locate the original index of the item in the originalArray
+  
+  Dim i As Long
+
+  For i = LBound(originalArray) To UBound(originalArray)
+    If originalArray(i).Name = item.Name Then
+      FindItemIndex = i + 1 '# Adjust for 1-based index
+      Exit Function
+    End If
+  Next i
+  
+End Function
+
+Private Sub GetSelectedListItem()
+  
+  Dim selectedIndex As Long
+
+  ' Get the selected index from the ListBox
+  selectedIndex = Me.ListBox1.ListIndex
+
+  ' Check if an item is selected
+  If selectedIndex = -1 Then
+'    Debug.Print "GetSelectedListItem: No item selected"
+    Set Me.selectedItem = Nothing
+  Else
+'    Debug.Print "frmSelect > GetSelectedListItem: Selected item: "; TypeName(Me.filteredArray(selectedIndex)); " - "; selectedIndex; " - "; Me.filteredArray(selectedIndex).Name; ""
+
+    ' Use the filtered array to get the selected element
+    Set Me.selectedItem = Me.filteredArray(selectedIndex)
+    
+    Select Case Me.resultType
+
+      Case "Workbook"
+        Set previousWorkbook = ActiveWorkbook
+
+      Case "Worksheet"
+        Set previousWorksheet = ActiveSheet
+'        Debug.Print "1st: "; previousWorksheet.Name
+
+      Case "Column"
+        On Error Resume Next    '* If the active cell is not in a column containing a ListColumn, ignore (should be a better way to handle)
+'TEMPDISAB for INSERTXLOOKUP issue        Set previousColumn = ActiveSheet.ListObjects(1).ListColumns(ActiveCell.Column - ActiveSheet.ListObjects(1).Range.Columns(1).Column + 1)
+        On Error GoTo 0
+        
+    End Select
+
+
+    ' Debugging output
+ '   Debug.Print "frmSelect > GetSelectedListItem > Me.selectedItem.Name: "; Me.selectedItem.Name
+  End If
+
+  ' Hide the form
+  Me.Hide
+End Sub
+
+
+Private Sub GetSelectedCell()
+  Dim selectionValue, n As Long, iscell As Boolean
+
+  selectionValue = TextBox1.Value
+  
+  If (IsNumeric(selectionValue)) Then
+  
+      Set Me.selectedCell = Cells(selectionValue, ActiveCell.Column)
+  
+  Else
+    
+      '' check each character within the value to see if it's a number (if any are it will be alphanumeric i.e. a cell, otherwise alpha only i.e. a column)
+      For n = 1 To Len(selectionValue)
+          If (IsNumeric(Mid(selectionValue, n, 1))) Then
+              iscell = True
+          End If
+      Next
+      
+      '' if it was a cell, i.e. alphanumeric, jump to that cell
+      If iscell = True Then
+        Set Me.selectedCell = Range(selectionValue)
+          
+      '' otherwise it's alpha only so jump to that column (same row)
+      Else
+        Set Me.selectedCell = Cells(ActiveCell.Row, Range(selectionValue & ":" & selectionValue).Column)
+            
+      End If
+    
+  End If
+  
+  ' Hide the form
+  Me.Hide
+  
+End Sub
+
+
+Private Sub GetSelectedID()
+  Dim selectionValue, c As Range, cellFound As Boolean, goToValue
+  
+  selectionValue = TextBox1.Value
+  
+  Call TbSetup
+  
+  For Each c In lc_ID.Range.Cells
+      If CStr(c.Value) = selectionValue Then
+        cellFound = True
+        Set Me.selectedCell = Cells(c.Row, ActiveCell.Column)
+      End If
+  Next
+    
+  '* Currently will only hide the form and continue if a value is found.  See if this is best?
+  If cellFound <> True Then
+    dP ("frmSelect > GetSelectedID: No ID found: " & selectionValue)
+  Else
+    ' Hide the form
+    Me.Hide
+  End If
+  
+'  ' Hide the form
+'  Me.Hide
+  
+End Sub
+
+
+Private Sub GetPrevious()
+  '# For the resultTypes below, if there was a 'previous' value will select that.  E.g. to jump back and forth between 2 sheets
+
+  If Me.resultType = "Workbook" And Not previousWorkbook Is Nothing Then
+    Set Me.selectedItem = previousWorkbook
+    Set previousWorkbook = ActiveWorkbook
+    Me.Hide
+
+  ElseIf Me.resultType = "Worksheet" And Not previousWorksheet Is Nothing Then
+    Set Me.selectedItem = previousWorksheet
+    Set previousWorksheet = ActiveSheet
+    Me.Hide
+
+  ElseIf Me.resultType = "Column" And Not previousColumn Is Nothing Then
+    Set Me.selectedItem = previousColumn
+    Set previousColumn = ActiveSheet.ListObjects(1).ListColumns(ActiveCell.Column - ActiveSheet.ListObjects(1).Range.Columns(1).Column + 1)
+    Me.Hide
+
+  Else
+    Debug.Print "frmSelect > GetPrevious: No previous item to select"
+
+  End If
+
+End Sub
+
+
+'  '# TEMP ARRAY CHECKS -------------------------------------------------------------------------
+'  Debug.Print "InitializeForm - initialItemsArray: Array: " & IsArray(initialItemsArray); ", Empty: " & IsEmpty(initialItemsArray)
+'  If IsArray(initialItemsArray) Then
+'      Debug.Print "InitializeForm - initialItemsArray: LBound: " & LBound(initialItemsArray); ", UBound: " & UBound(initialItemsArray)
+'  End If
+'  Debug.Print "---------"
+'  '# END ARRAY CHECKS -------------------------------------------------------------------------
+
+
