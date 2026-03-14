@@ -1,0 +1,112 @@
+'# frmActions
+'# Requires controls to be added first (no customisation or name changes):
+    '# Label, TextBox
+'# If form size goes odd in editor, can just drag it a little to resize and should reset
+
+Public macrosDict As Object
+Public macroName As String, macroParameter As Variant
+Public cancelForm As Boolean
+
+Private Sub proceduresIndex()
+
+  '# For Shift + F2, Ctrl + Shift + F2.  I.e. a list to jump to easily since VBA and VS Code don't manage it well
+  Exit Sub '------------------------
+  
+  MacroOptions        '# Defines the options in the list, and their associated macros/parameter (only handles a single param, or has Null)
+  UserForm_Activate   '# Lay out the form, and define/show the caption using MacroOptions
+  TextBox1_Change     '# If one of the macro options is entered, set the macro name/parameter to be used by calling procedure, close form
+  TextBox1_KeyDown    '# Used for Esc
+  
+End Sub
+
+Private Sub MacroOptions()
+
+  Set macrosDict = CreateObject("Scripting.Dictionary")
+  
+  macrosDict.Add "c", Array("copy sheet", "copySheet", Null)
+  macrosDict.Add "C", Array("copy sheet (move)", "copySheet", True)
+  macrosDict.Add "d", Array("delete sheet", "deleteSheet", Null)
+  macrosDict.Add "e", Array("errors check", "errorsCheck")
+  macrosDict.Add "f", Array("freeze cells", "freezeCells", Null)
+  macrosDict.Add "h", Array("highlight toggle", "highlightToggle", Null)
+  macrosDict.Add "l", Array("open List options", "openListOptions", Null)
+  macrosDict.Add "m", Array("insert MATCH", "insertFormula_MATCH", Null)
+  macrosDict.Add "p", Array("paste value", "pasteValue", Null)
+  macrosDict.Add "r", Array("rename sheet", "renameSheet", Null)
+  macrosDict.Add "s", Array("new sheet", "newSheet", Null)
+  macrosDict.Add "S", Array("new sheet (and rename)", "newSheet", True)
+  macrosDict.Add "u", Array("unique values", "uniqueValues", Null)
+  macrosDict.Add "x", Array("insert XLOOKUP", "insertFormula_XLOOKUP", Null)
+  macrosDict.Add "X", Array("insert XLOOKUP (other workbook)", "insertFormula_XLOOKUP", False)
+
+End Sub
+
+Private Sub UserForm_Activate()
+
+  Dim key As Variant
+  Dim captionText As String
+  
+  With Me
+      .Width = 200
+      .Height = 260
+      .Caption = "Action"
+  End With
+  
+  With Label1
+      .Left = 10
+      .Top = 40
+      .BackStyle = fmBackStyleTransparent
+      .Height = Me.Height - 40
+      .Width = Me.Width - 20
+      .Visible = True
+  '    .Font = "Segoe UI"
+  '    .Font.Size = 8
+  End With
+  
+  With TextBox1
+    .Left = 10
+  '  .Top = Label1.Height + 20
+    .Top = 10
+    .Width = 30
+  End With
+    
+  '# Set the default list of options, and get additional options from modConfig
+  Call MacroOptions
+  Call frmActionsConfig
+
+  '# Build the caption text from each item in macrosDict, using the key and first element in the value's array
+  For Each key In macrosDict.Keys
+      captionText = captionText & key & ". " & macrosDict(key)(0) & vbCr
+  Next key
+
+  '# Set the label's caption
+  Me.Label1.Caption = captionText
+
+  
+End Sub
+
+Private Sub TextBox1_Change()
+  
+  '# Check if the key exists in the dictionary (i.e. if the textbox value matches one of the predefined options from MacroOptions)
+  If macrosDict.Exists(TextBox1.value) Then
+    
+    '# set macroName and macroParameter so they can be used by calling macro (NB: these variables were defined above as Public)
+    macroName = macrosDict(TextBox1.value)(1) ' Macro name
+    macroParameter = macrosDict(TextBox1.value)(2) ' Parameter (can be Null)
+      
+    Me.Hide
+  
+  End If
+  
+End Sub
+
+Private Sub TextBox1_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)
+  '# Using KeyDown because it allows suppressing the default behaviour (if the textbox has a value, Esc will clear it by default)
+  
+  If KeyCode = vbKeyEscape Then '# Esc
+    KeyCode = 0 '# Suppress default behavior
+    Unload Me
+    Exit Sub
+  End If
+  
+End Sub
