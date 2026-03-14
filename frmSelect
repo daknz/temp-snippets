@@ -1,4 +1,7 @@
 '# frmSelect
+'# Requires controls to be added first (no customisation or name changes):
+    '# Label, TextBox, ListBox
+
 Option Explicit
 Public itemsArray As Variant, filteredArray As Variant, resultType As String, selectedItem As Object, selectedCell As Range, parentWorkbook As Workbook, parentWorksheet As Worksheet
 
