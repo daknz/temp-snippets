@@ -1,0 +1,237 @@
+Sub DrawTimelineShapes()
+  
+  Dim wsData As Worksheet
+  Dim wsSum As Worksheet
+  Dim tbl As ListObject
+  
+  Set wsData = ActiveWorkbook.Worksheets("Data")
+  Set wsSum = ActiveWorkbook.Worksheets("Summary")
+  Set tbl = wsData.ListObjects("tblData")
+  
+  Dim rowItem As ListRow
+  Dim shp As Shape
+  
+  ' # Clear existing shapes
+  For Each shp In wsSum.Shapes
+    shp.Delete
+  Next shp
+  
+  ' # Cache column indexes
+  Dim colGroup As Long, colDesc As Long, colFrom As Long, colTo As Long
+  colGroup = tbl.ListColumns("Group").Index
+  colDesc = tbl.ListColumns("Description").Index
+  colFrom = tbl.ListColumns("From").Index
+  colTo = tbl.ListColumns("To").Index
+  
+  ' # Loop data rows
+  For Each rowItem In tbl.ListRows
+    
+    Dim grp As Variant
+    Dim dtFrom As Date
+    Dim dtTo As Date
+    Dim desc As String
+        
+    grp = rowItem.Range(1, colGroup).value
+    desc = rowItem.Range(1, colDesc).value
+    dtFrom = rowItem.Range(1, colFrom).value
+    dtTo = rowItem.Range(1, colTo).value
+    ' # Find Summary row
+    Dim sumRow As Long
+    sumRow = FindGroupRow(wsSum, grp)
+Debug.Print "dtFrTo", dtFrom, dtTo, sumRow
+    If sumRow = 0 Then GoTo NextRow
+    
+    ' # Find columns (daily now, no Monday rounding)
+    Dim colStart As Long
+    Dim colEnd As Long
+    
+    colStart = FindDateColumn(wsSum, dtFrom)
+    colEnd = FindDateColumn(wsSum, dtTo)
+    
+Debug.Print "colStEnd", colSt, colEnd
+    If colStart = 0 Or colEnd = 0 Then GoTo NextRow
+    
+    ' # Cells
+    Dim startCell As Range
+    Dim endCell As Range
+    
+    Set startCell = wsSum.Cells(sumRow, colStart)
+    Set endCell = wsSum.Cells(sumRow, colEnd)
+
+    ' # Position + size (FULL cell snap)
+    Dim leftPos As Double
+    Dim topPos As Double
+    Dim widthVal As Double
+    Dim heightVal As Double
+    
+    leftPos = startCell.Left
+    topPos = startCell.Top
+    widthVal = endCell.Left + endCell.Width - startCell.Left
+    heightVal = startCell.Height
+    
+    ' =========================
+    ' # BAR SHAPE (grid aligned)
+    ' =========================
+    
+    Dim barShp As Shape
+    Set barShp = wsSum.Shapes.AddShape(msoShapeRectangle, leftPos, topPos, widthVal, heightVal)
+    
+    With barShp
+'      .Fill.ForeColor.RGB = RGB(218, 233, 248)    '# blue
+      .Fill.ForeColor.RGB = RGB(218, 242, 208)    '# green
+      .Line.Visible = msoTrue
+      .Line.ForeColor.RGB = RGB(255, 255, 255)
+      .Line.Weight = 2
+      .Placement = xlMoveAndSize
+    End With
+    
+    ' =========================
+    ' # LABEL SHAPE (flexible)
+    ' =========================
+    
+    Dim labelWidth As Double
+    
+    Dim textWidth As Double
+    Dim charWidth As Double
+    
+    ' # tweak this for Aptos Narrow 10.5
+    charWidth = 4.8
+    
+    textWidth = Len(desc) * charWidth
+    
+    If textWidth <= (widthVal * 2) Then
+      ' # Short enough ? keep single line within bar
+      labelWidth = widthVal
+    Else
+      ' # Too long ? force ~2 lines
+      labelWidth = textWidth / 2
+    End If
+    
+    ' # Safety clamps
+    labelWidth = Application.Max(40, Application.Min(300, labelWidth))
+    
+    
+    Dim txtShp As Shape
+    Set txtShp = wsSum.Shapes.AddTextbox( _
+      Orientation:=msoTextOrientationHorizontal, _
+      Left:=leftPos, _
+      Top:=topPos, _
+      Width:=labelWidth, _
+      Height:=heightVal) ' # allow ~2 lines
+    
+    With txtShp
+      .TextFrame2.TextRange.Text = desc
+      .TextFrame2.TextRange.Font.Size = 10
+      .TextFrame2.VerticalAnchor = msoAnchorMiddle
+      
+      ' # Wrap enabled
+      .TextFrame2.WordWrap = msoTrue
+      
+      ' # No fill/line (label only)
+      .Fill.Visible = msoFalse
+      .Line.Visible = msoFalse
+      
+      ' # Padding
+      With .TextFrame2
+        .MarginTop = 2
+        .MarginBottom = 2
+        .MarginLeft = 2
+        .MarginRight = 2
+      End With
+      
+      .Placement = xlMoveAndSize
+    End With
+    
+    ' =========================
+    ' # POSITION LABEL
+    ' =========================
+    
+    If widthVal >= labelWidth Then
+      ' # Fits fully inside bar
+      txtShp.Left = leftPos + 2
+      txtShp.Width = widthVal - 4
+    Else
+      ' # Not enough space ? anchor to start of bar and extend right
+      txtShp.Left = leftPos + 2
+      txtShp.Width = labelWidth
+    End If
+    
+    ' =========================
+    ' # HYPERLINK (apply to both)
+    ' =========================
+    
+    Dim dataRowNumber As Long
+    dataRowNumber = rowItem.Range.row
+    
+    wsSum.Hyperlinks.Add _
+      anchor:=barShp, _
+      Address:="", _
+      SubAddress:="'" & wsData.Name & "'!" & dataRowNumber & ":" & dataRowNumber
+    
+    wsSum.Hyperlinks.Add _
+      anchor:=txtShp, _
+      Address:="", _
+      SubAddress:="'" & wsData.Name & "'!" & dataRowNumber & ":" & dataRowNumber
+    
+    Sheets("Summary").Activate
+
+NextRow:
+  Next rowItem
+
+End Sub
+
+
+' # ===== Helpers =====
+
+Function FindGroupRow(ws As Worksheet, grp As Variant) As Long
+  
+  Dim anchor As Range
+  Set anchor = ws.Range("TimelineTopLeft")
+  
+  Dim startRow As Long
+  startRow = anchor.row + 1
+  
+  Dim groupCol As Long
+  groupCol = anchor.Column
+  
+  Dim lastRow As Long
+  lastRow = ws.Cells(ws.Rows.count, groupCol).End(xlUp).row
+  
+  Dim r As Long
+  For r = startRow To lastRow
+    If ws.Cells(r, groupCol).value = grp Then
+      FindGroupRow = r
+      Exit Function
+    End If
+  Next r
+  
+End Function
+
+
+Function FindDateColumn(ws As Worksheet, targetDate As Date) As Long
+  
+  'Debug.Print targetDate
+  
+  Dim anchor As Range
+  Set anchor = ws.Range("TimelineTopLeft")
+  
+  Dim headerRow As Long
+  headerRow = anchor.row
+  
+  Dim startCol As Long
+  startCol = anchor.Column + 1
+  
+  Dim lastCol As Long
+  lastCol = ws.Cells(headerRow, ws.Columns.count).End(xlToLeft).Column
+  
+  Dim c As Long
+  For c = startCol To lastCol
+    'Debug.Print ws.Cells(headerRow, c).value, targetDate
+    If ws.Cells(headerRow, c).value = targetDate Then
+      FindDateColumn = c
+      'Debug.Print targetDate, c
+      Exit Function
+    End If
+  Next c
+  
+End Function
