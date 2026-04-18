@@ -1,237 +1,500 @@
-Sub DrawTimelineShapes()
-  
-  Dim wsData As Worksheet
-  Dim wsSum As Worksheet
+Option Explicit
+
+'# Call TimelineShortcut to run (currently doing via magicMacro)
+'# Will re-render all, unless select cells in specific row(s) in the timeline in which case will just update those in data and timeline
+
+'==================================================
+' # ENTRY POINT
+'==================================================
+Sub TimelineShortcut()
+
+  Dim ws As Worksheet
+  Set ws = ActiveSheet
+
   Dim tbl As ListObject
-  
-  Set wsData = ActiveWorkbook.Worksheets("Data")
-  Set wsSum = ActiveWorkbook.Worksheets("Summary")
-  Set tbl = wsData.ListObjects("tblData")
-  
-  Dim rowItem As ListRow
-  Dim shp As Shape
-  
-  ' # Clear existing shapes
-  For Each shp In wsSum.Shapes
-    shp.Delete
-  Next shp
-  
-  ' # Cache column indexes
-  Dim colGroup As Long, colDesc As Long, colFrom As Long, colTo As Long
-  colGroup = tbl.ListColumns("Group").Index
-  colDesc = tbl.ListColumns("Description").Index
-  colFrom = tbl.ListColumns("From").Index
-  colTo = tbl.ListColumns("To").Index
-  
-  ' # Loop data rows
-  For Each rowItem In tbl.ListRows
-    
-    Dim grp As Variant
-    Dim dtFrom As Date
-    Dim dtTo As Date
-    Dim desc As String
-        
-    grp = rowItem.Range(1, colGroup).value
-    desc = rowItem.Range(1, colDesc).value
-    dtFrom = rowItem.Range(1, colFrom).value
-    dtTo = rowItem.Range(1, colTo).value
-    ' # Find Summary row
-    Dim sumRow As Long
-    sumRow = FindGroupRow(wsSum, grp)
-Debug.Print "dtFrTo", dtFrom, dtTo, sumRow
-    If sumRow = 0 Then GoTo NextRow
-    
-    ' # Find columns (daily now, no Monday rounding)
-    Dim colStart As Long
-    Dim colEnd As Long
-    
-    colStart = FindDateColumn(wsSum, dtFrom)
-    colEnd = FindDateColumn(wsSum, dtTo)
-    
-Debug.Print "colStEnd", colSt, colEnd
-    If colStart = 0 Or colEnd = 0 Then GoTo NextRow
-    
-    ' # Cells
-    Dim startCell As Range
-    Dim endCell As Range
-    
-    Set startCell = wsSum.Cells(sumRow, colStart)
-    Set endCell = wsSum.Cells(sumRow, colEnd)
+  Set tbl = ws.ListObjects(1)
 
-    ' # Position + size (FULL cell snap)
-    Dim leftPos As Double
-    Dim topPos As Double
-    Dim widthVal As Double
-    Dim heightVal As Double
-    
-    leftPos = startCell.Left
-    topPos = startCell.Top
-    widthVal = endCell.Left + endCell.Width - startCell.Left
-    heightVal = startCell.Height
-    
-    ' =========================
-    ' # BAR SHAPE (grid aligned)
-    ' =========================
-    
-    Dim barShp As Shape
-    Set barShp = wsSum.Shapes.AddShape(msoShapeRectangle, leftPos, topPos, widthVal, heightVal)
-    
-    With barShp
-'      .Fill.ForeColor.RGB = RGB(218, 233, 248)    '# blue
-      .Fill.ForeColor.RGB = RGB(218, 242, 208)    '# green
-      .Line.Visible = msoTrue
-      .Line.ForeColor.RGB = RGB(255, 255, 255)
-      .Line.Weight = 2
-      .Placement = xlMoveAndSize
-    End With
-    
-    ' =========================
-    ' # LABEL SHAPE (flexible)
-    ' =========================
-    
-    Dim labelWidth As Double
-    
-    Dim textWidth As Double
-    Dim charWidth As Double
-    
-    ' # tweak this for Aptos Narrow 10.5
-    charWidth = 4.8
-    
-    textWidth = Len(desc) * charWidth
-    
-    If textWidth <= (widthVal * 2) Then
-      ' # Short enough ? keep single line within bar
-      labelWidth = widthVal
-    Else
-      ' # Too long ? force ~2 lines
-      labelWidth = textWidth / 2
-    End If
-    
-    ' # Safety clamps
-    labelWidth = Application.Max(40, Application.Min(300, labelWidth))
-    
-    
-    Dim txtShp As Shape
-    Set txtShp = wsSum.Shapes.AddTextbox( _
-      Orientation:=msoTextOrientationHorizontal, _
-      Left:=leftPos, _
-      Top:=topPos, _
-      Width:=labelWidth, _
-      Height:=heightVal) ' # allow ~2 lines
-    
-    With txtShp
-      .TextFrame2.TextRange.Text = desc
-      .TextFrame2.TextRange.Font.Size = 10
-      .TextFrame2.VerticalAnchor = msoAnchorMiddle
-      
-      ' # Wrap enabled
-      .TextFrame2.WordWrap = msoTrue
-      
-      ' # No fill/line (label only)
-      .Fill.Visible = msoFalse
-      .Line.Visible = msoFalse
-      
-      ' # Padding
-      With .TextFrame2
-        .MarginTop = 2
-        .MarginBottom = 2
-        .MarginLeft = 2
-        .MarginRight = 2
-      End With
-      
-      .Placement = xlMoveAndSize
-    End With
-    
-    ' =========================
-    ' # POSITION LABEL
-    ' =========================
-    
-    If widthVal >= labelWidth Then
-      ' # Fits fully inside bar
-      txtShp.Left = leftPos + 2
-      txtShp.Width = widthVal - 4
-    Else
-      ' # Not enough space ? anchor to start of bar and extend right
-      txtShp.Left = leftPos + 2
-      txtShp.Width = labelWidth
-    End If
-    
-    ' =========================
-    ' # HYPERLINK (apply to both)
-    ' =========================
-    
-    Dim dataRowNumber As Long
-    dataRowNumber = rowItem.Range.row
-    
-    wsSum.Hyperlinks.Add _
-      anchor:=barShp, _
-      Address:="", _
-      SubAddress:="'" & wsData.Name & "'!" & dataRowNumber & ":" & dataRowNumber
-    
-    wsSum.Hyperlinks.Add _
-      anchor:=txtShp, _
-      Address:="", _
-      SubAddress:="'" & wsData.Name & "'!" & dataRowNumber & ":" & dataRowNumber
-    
-    Sheets("Summary").Activate
+  Dim tl As Range
+  Set tl = GetTimelineRange(ws, tbl)
 
-NextRow:
-  Next rowItem
+  If Not Intersect(Selection, tl) Is Nothing Then
+    UpdateFast ws, tbl
+  Else
+    UpdateAll ws, tbl
+  End If
 
 End Sub
 
 
-' # ===== Helpers =====
+'==================================================
+' # TIMELINE RANGE
+'==================================================
+Function GetTimelineRange(ws As Worksheet, tbl As ListObject) As Range
 
-Function FindGroupRow(ws As Worksheet, grp As Variant) As Long
-  
-  Dim anchor As Range
-  Set anchor = ws.Range("TimelineTopLeft")
-  
-  Dim startRow As Long
-  startRow = anchor.row + 1
-  
-  Dim groupCol As Long
-  groupCol = anchor.Column
-  
-  Dim lastRow As Long
-  lastRow = ws.Cells(ws.Rows.count, groupCol).End(xlUp).row
-  
-  Dim r As Long
-  For r = startRow To lastRow
-    If ws.Cells(r, groupCol).value = grp Then
-      FindGroupRow = r
-      Exit Function
-    End If
-  Next r
-  
+  Dim headerRow As Long
+  headerRow = tbl.HeaderRowRange.row
+
+  Dim startCol As Long
+  startCol = tbl.Range.Column + tbl.Range.Columns.count + 1
+
+  Dim lastCol As Long
+  lastCol = ws.Cells(headerRow, ws.Columns.count).End(xlToLeft).Column
+
+  Set GetTimelineRange = ws.Range( _
+    ws.Cells(tbl.DataBodyRange.row, startCol), _
+    ws.Cells(tbl.DataBodyRange.row + tbl.ListRows.count - 1, lastCol) _
+  )
+
 End Function
 
 
-Function FindDateColumn(ws As Worksheet, targetDate As Date) As Long
-  
-  'Debug.Print targetDate
-  
-  Dim anchor As Range
-  Set anchor = ws.Range("TimelineTopLeft")
-  
+'==================================================
+' # FAST MODE
+'==================================================
+Sub UpdateFast(ws As Worksheet, tbl As ListObject)
+
   Dim headerRow As Long
-  headerRow = anchor.row
-  
+  headerRow = tbl.HeaderRowRange.row
+
+  Dim colFrom As Long, colTo As Long, colType As Long, colGroup As Long
+  colFrom = tbl.ListColumns("From").Index
+  colTo = tbl.ListColumns("To").Index
+  colType = tbl.ListColumns("Type").Index
+  colGroup = tbl.ListColumns("Group").Index
+
+  Dim dict As Object
+  Set dict = CreateObject("Scripting.Dictionary")
+
+  Dim area As Range, cell As Range
+  Dim tl As Range
+  Set tl = GetTimelineRange(ws, tbl)
+
+  ' =========================
+  ' # collect selection
+  ' =========================
+  For Each area In Selection.Areas
+    For Each cell In area.Cells
+
+      If Not Intersect(cell, tl) Is Nothing Then
+
+        Dim r As Long
+        r = cell.row
+
+        If Not dict.exists(r) Then
+          dict.Add r, Array(cell.Column, cell.Column)
+        Else
+          Dim a
+          a = dict(r)
+          a(0) = Application.Min(a(0), cell.Column)
+          a(1) = Application.Max(a(1), cell.Column)
+          dict(r) = a
+        End If
+
+      End If
+
+    Next cell
+  Next area
+
+  ' =========================
+  ' # update table rows
+  ' =========================
+  Dim key As Variant
+
+  For Each key In dict.keys
+
+    Dim iRow As Long
+    iRow = key - tbl.DataBodyRange.row + 1
+
+    tbl.DataBodyRange(iRow, colFrom).value = ws.Cells(headerRow, dict(key)(0)).value
+    tbl.DataBodyRange(iRow, colTo).value = ws.Cells(headerRow, dict(key)(1)).value
+
+  Next key
+
+  ' =========================
+  ' # headers
+  ' =========================
+  RecalculateHeaders tbl
+  AddHeaderRows dict, tbl
+
+  ' =========================
+  ' # redraw affected rows
+  ' =========================
+  DrawRows ws, tbl, dict
+  DrawTodayBorder ws, tbl
+
+End Sub
+
+
+'==================================================
+' # ADD HEADER ROWS TO REDRAW SET
+'==================================================
+Sub AddHeaderRows(dict As Object, tbl As ListObject)
+
+  Dim colType As Long, colGroup As Long
+  colType = tbl.ListColumns("Type").Index
+  colGroup = tbl.ListColumns("Group").Index
+
+  Dim i As Long
+
+  For i = 1 To tbl.ListRows.count
+
+    If tbl.DataBodyRange(i, colType).value = "Header" Then
+
+      Dim grp As String
+      grp = tbl.DataBodyRange(i, colGroup).value
+
+      Dim key As Variant
+      For Each key In dict.keys
+
+        Dim r As Long
+        r = key - tbl.DataBodyRange.row + 1
+
+        If tbl.DataBodyRange(r, colGroup).value = grp Then
+          dict(tbl.DataBodyRange(i, 1).row) = Array(0, 0)
+          Exit For
+        End If
+
+      Next key
+
+    End If
+
+  Next i
+
+End Sub
+
+
+'==================================================
+' # DATE MAP (FAST LOOKUP)
+'==================================================
+Function GetDateMap(ws As Worksheet, tbl As ListObject) As Object
+
+  Dim dict As Object
+  Set dict = CreateObject("Scripting.Dictionary")
+
+  Dim headerRow As Long
+  headerRow = tbl.HeaderRowRange.row
+
   Dim startCol As Long
-  startCol = anchor.Column + 1
-  
+  startCol = tbl.Range.Column + tbl.Range.Columns.count + 1
+
   Dim lastCol As Long
   lastCol = ws.Cells(headerRow, ws.Columns.count).End(xlToLeft).Column
+
+  Dim c As Long
+
+  For c = startCol To lastCol
+    If Not IsEmpty(ws.Cells(headerRow, c).value) Then
+      dict(ws.Cells(headerRow, c).value) = c
+    End If
+  Next c
+
+  Set GetDateMap = dict
+
+End Function
+
+
+'==================================================
+' # DRAW ROWS (FAST MODE)
+'==================================================
+Sub DrawRows(ws As Worksheet, tbl As ListObject, dict As Object)
+
+  Dim headerRow As Long
+  headerRow = tbl.HeaderRowRange.row
+
+  Dim timelineStartCol As Long
+  timelineStartCol = tbl.Range.Column + tbl.Range.Columns.count + 1
+
+  Dim lastCol As Long
+  lastCol = ws.Cells(headerRow, ws.Columns.count).End(xlToLeft).Column
+
+  Dim dateMap As Object
+  Set dateMap = GetDateMap(ws, tbl)
+
+  Dim key As Variant
+
+  For Each key In dict.keys
+
+    Dim wsRow As Long
+    wsRow = key
+
+    Dim c As Long
+
+    ' clear row
+    For c = timelineStartCol To lastCol
+      ws.Cells(wsRow, c).Interior.Pattern = xlNone
+      ws.Cells(wsRow, c).ClearContents
+    Next c
+
+    Dim iRow As Long
+    iRow = key - tbl.DataBodyRange.row + 1
+
+    Dim fromDate As Variant, toDate As Variant, desc As String, grp As String
+    fromDate = tbl.DataBodyRange(iRow, tbl.ListColumns("From").Index).value
+    toDate = tbl.DataBodyRange(iRow, tbl.ListColumns("To").Index).value
+    desc = tbl.DataBodyRange(iRow, tbl.ListColumns("Description").Index).value
+    grp = tbl.DataBodyRange(iRow, tbl.ListColumns("Group").Index).value
+
+    Dim isHeader As Boolean
+    isHeader = (tbl.DataBodyRange(iRow, tbl.ListColumns("Type").Index).value = "Header")
+
+    Dim fillColor As Long
+    If isHeader Then
+      fillColor = RGB(142, 217, 115)
+    Else
+      fillColor = RGB(218, 242, 208)
+    End If
+
+    Dim colStart As Long, colEnd As Long
+
+    If dateMap.exists(fromDate) Then
+      colStart = dateMap(fromDate)
+    Else
+      colStart = timelineStartCol
+    End If
+
+    If dateMap.exists(toDate) Then
+      colEnd = dateMap(toDate)
+    Else
+      colEnd = lastCol
+    End If
+
+    If colStart > colEnd Then GoTo NextRow
+
+    For c = colStart To colEnd
+      ws.Cells(wsRow, c).Interior.Color = fillColor
+    Next c
+
+    If desc <> "" Then
+      ws.Cells(wsRow, colStart).value = desc
+    Else
+      ws.Cells(wsRow, colStart).value = grp
+    End If
+
+NextRow:
+  Next key
+
+End Sub
+
+
+'==================================================
+' # FULL MODE
+'==================================================
+Sub UpdateAll(ws As Worksheet, tbl As ListObject)
+
+  UpdateFast ws, tbl
+  DrawTimelineCells ws, tbl
+  DrawTodayBorder ws, tbl
   
+End Sub
+
+
+'==================================================
+' # FULL REDRAW
+'==================================================
+Sub DrawTimelineCells(ws As Worksheet, tbl As ListObject)
+
+  RecalculateHeaders tbl
+
+  Dim colGrp As Long, colDesc As Long, colFrom As Long, colTo As Long
+  colGrp = tbl.ListColumns("Group").Index
+  colDesc = tbl.ListColumns("Description").Index
+  colFrom = tbl.ListColumns("From").Index
+  colTo = tbl.ListColumns("To").Index
+
+  Dim headerRow As Long
+  headerRow = tbl.HeaderRowRange.row
+
+  Dim timelineStartCol As Long
+  timelineStartCol = tbl.Range.Column + tbl.Range.Columns.count + 1
+
+  Dim lastCol As Long
+  lastCol = ws.Cells(headerRow, ws.Columns.count).End(xlToLeft).Column
+
+  Dim clearRange As Range
+  Set clearRange = ws.Range( _
+    ws.Cells(tbl.DataBodyRange.row, timelineStartCol), _
+    ws.Cells(tbl.DataBodyRange.row + tbl.ListRows.count - 1, lastCol) _
+  )
+
+  clearRange.Interior.Pattern = xlNone
+  clearRange.ClearContents
+
+  Dim dateMap As Object
+  Set dateMap = GetDateMap(ws, tbl)
+
+  Dim i As Long
+
+  For i = 1 To tbl.ListRows.count
+
+    Dim wsRow As Long
+    wsRow = tbl.DataBodyRange(i, 1).row
+
+    Dim fromDate As Variant, toDate As Variant, desc As String, grp As String
+    fromDate = tbl.DataBodyRange(i, colFrom).value
+    toDate = tbl.DataBodyRange(i, colTo).value
+    grp = tbl.DataBodyRange(i, colGrp).value
+    desc = tbl.DataBodyRange(i, colDesc).value
+
+    If desc = "" Then desc = grp
+
+    Dim isHeader As Boolean
+    isHeader = (tbl.DataBodyRange(i, tbl.ListColumns("Type").Index).value = "Header")
+
+    Dim fillColor As Long
+    If isHeader Then
+      fillColor = RGB(142, 217, 115)
+    Else
+      fillColor = RGB(218, 242, 208)
+    End If
+
+    Dim colStart As Long, colEnd As Long
+
+    If dateMap.exists(fromDate) Then
+      colStart = dateMap(fromDate)
+    Else
+      colStart = timelineStartCol
+    End If
+
+    If dateMap.exists(toDate) Then
+      colEnd = dateMap(toDate)
+    Else
+      colEnd = lastCol
+    End If
+
+    If colStart > colEnd Then GoTo NextRow
+
+    Dim c As Long
+    For c = colStart To colEnd
+      ws.Cells(wsRow, c).Interior.Color = fillColor
+    Next c
+
+    ws.Cells(wsRow, colStart).value = desc
+
+NextRow:
+  Next i
+
+End Sub
+
+
+'==================================================
+' # HEADER CALC
+'==================================================
+Sub RecalculateHeaders(tbl As ListObject)
+
+  Dim colFrom As Long, colTo As Long, colType As Long, colGroup As Long
+  colFrom = tbl.ListColumns("From").Index
+  colTo = tbl.ListColumns("To").Index
+  colType = tbl.ListColumns("Type").Index
+  colGroup = tbl.ListColumns("Group").Index
+
+  Dim dictMin As Object, dictMax As Object
+  Set dictMin = CreateObject("Scripting.Dictionary")
+  Set dictMax = CreateObject("Scripting.Dictionary")
+
+  Dim i As Long
+
+  For i = 1 To tbl.ListRows.count
+
+    Dim grp As String
+    grp = tbl.DataBodyRange(i, colGroup).value
+
+    If tbl.DataBodyRange(i, colType).value <> "Header" Then
+
+      Dim dFrom As Variant, dTo As Variant
+      dFrom = tbl.DataBodyRange(i, colFrom).value
+      dTo = tbl.DataBodyRange(i, colTo).value
+
+      If Not dictMin.exists(grp) Then
+        dictMin.Add grp, dFrom
+        dictMax.Add grp, dTo
+      Else
+        If dFrom < dictMin(grp) Then dictMin(grp) = dFrom
+        If dTo > dictMax(grp) Then dictMax(grp) = dTo
+      End If
+
+    End If
+
+  Next i
+
+  For i = 1 To tbl.ListRows.count
+
+    If tbl.DataBodyRange(i, colType).value = "Header" Then
+
+      Dim grp2 As String
+      grp2 = tbl.DataBodyRange(i, colGroup).value
+
+      If dictMin.exists(grp2) Then
+        tbl.DataBodyRange(i, colFrom).value = dictMin(grp2)
+        tbl.DataBodyRange(i, colTo).value = dictMax(grp2)
+      End If
+
+    End If
+
+  Next i
+
+End Sub
+
+
+Function GetTodayColumn(ws As Worksheet, tbl As ListObject) As Long
+
+  Dim headerRow As Long
+  headerRow = tbl.HeaderRowRange.row
+
+  Dim startCol As Long
+  startCol = tbl.Range.Column + tbl.Range.Columns.count + 1
+
+  Dim lastCol As Long
+  lastCol = ws.Cells(headerRow, ws.Columns.count).End(xlToLeft).Column
+
+  Dim targetDate As Date
+  targetDate = Date
+
+  ' # push weekend to Monday
+  If Weekday(targetDate, vbMonday) > 5 Then
+    targetDate = targetDate + (8 - Weekday(targetDate, vbMonday))
+  End If
+
   Dim c As Long
   For c = startCol To lastCol
-    'Debug.Print ws.Cells(headerRow, c).value, targetDate
     If ws.Cells(headerRow, c).value = targetDate Then
-      FindDateColumn = c
-      'Debug.Print targetDate, c
+      GetTodayColumn = c
       Exit Function
     End If
   Next c
-  
+
 End Function
+
+Sub DrawTodayBorder(ws As Worksheet, tbl As ListObject)
+
+  Dim headerRow As Long
+  headerRow = tbl.HeaderRowRange.row
+
+  Dim startCol As Long
+  startCol = tbl.Range.Column + tbl.Range.Columns.count + 1
+
+  Dim lastCol As Long
+  lastCol = ws.Cells(headerRow, ws.Columns.count).End(xlToLeft).Column
+
+  Dim rng As Range
+  Set rng = ws.Range(ws.Cells(headerRow, startCol), ws.Cells(headerRow, lastCol))
+
+  ' =========================
+  ' # clear TOP border only
+  ' =========================
+  rng.Borders(xlEdgeTop).LineStyle = xlNone
+
+  ' =========================
+  ' # find today (or Monday)
+  ' =========================
+  Dim colToday As Long
+  colToday = GetTodayColumn(ws, tbl)
+
+  If colToday = 0 Then Exit Sub
+
+  With ws.Cells(headerRow, colToday).Borders(xlEdgeTop)
+    .LineStyle = xlContinuous
+    .Weight = xlThick
+    .Color = RGB(255, 0, 0)
+  End With
+
+End Sub
