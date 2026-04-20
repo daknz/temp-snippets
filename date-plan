@@ -245,20 +245,36 @@ Sub DrawRows(ws As Worksheet, tbl As ListObject, dict As Object)
     End If
 
     Dim colStart As Long, colEnd As Long
-
-    If dateMap.exists(fromDate) Then
+    Dim hasFrom As Boolean, hasTo As Boolean
+    
+    hasFrom = dateMap.exists(fromDate)
+    hasTo = dateMap.exists(toDate)
+    
+    ' =========================
+    ' # no dates ? no bar
+    ' =========================
+    If Not hasFrom And Not hasTo Then GoTo NextRow
+    
+    ' =========================
+    ' # one date ? single cell
+    ' =========================
+    If hasFrom And Not hasTo Then
       colStart = dateMap(fromDate)
+      colEnd = colStart
+    
+    ElseIf Not hasFrom And hasTo Then
+      colStart = dateMap(toDate)
+      colEnd = colStart
+    
     Else
-      colStart = timelineStartCol
-    End If
-
-    If dateMap.exists(toDate) Then
+      ' =========================
+      ' # both dates ? normal range
+      ' =========================
+      colStart = dateMap(fromDate)
       colEnd = dateMap(toDate)
-    Else
-      colEnd = lastCol
+    
+      If colStart > colEnd Then GoTo NextRow
     End If
-
-    If colStart > colEnd Then GoTo NextRow
 
     For c = colStart To colEnd
       ws.Cells(wsRow, c).Interior.Color = fillColor
@@ -347,21 +363,38 @@ Sub DrawTimelineCells(ws As Worksheet, tbl As ListObject)
       fillColor = RGB(218, 242, 208)
     End If
 
+
     Dim colStart As Long, colEnd As Long
-
-    If dateMap.exists(fromDate) Then
+    Dim hasFrom As Boolean, hasTo As Boolean
+    
+    hasFrom = dateMap.exists(fromDate)
+    hasTo = dateMap.exists(toDate)
+    
+    ' =========================
+    ' # no dates ? no bar
+    ' =========================
+    If Not hasFrom And Not hasTo Then GoTo NextRow
+    
+    ' =========================
+    ' # one date ? single cell
+    ' =========================
+    If hasFrom And Not hasTo Then
       colStart = dateMap(fromDate)
+      colEnd = colStart
+    
+    ElseIf Not hasFrom And hasTo Then
+      colStart = dateMap(toDate)
+      colEnd = colStart
+    
     Else
-      colStart = timelineStartCol
-    End If
-
-    If dateMap.exists(toDate) Then
+      ' =========================
+      ' # both dates ? normal range
+      ' =========================
+      colStart = dateMap(fromDate)
       colEnd = dateMap(toDate)
-    Else
-      colEnd = lastCol
+    
+      If colStart > colEnd Then GoTo NextRow
     End If
-
-    If colStart > colEnd Then GoTo NextRow
 
     Dim c As Long
     For c = colStart To colEnd
