@@ -432,11 +432,16 @@ Sub RecalculateHeaders(tbl As ListObject)
     grp = tbl.DataBodyRange(i, colGroup).value
 
     If tbl.DataBodyRange(i, colType).value <> "Header" Then
-
+    
       Dim dFrom As Variant, dTo As Variant
       dFrom = tbl.DataBodyRange(i, colFrom).value
       dTo = tbl.DataBodyRange(i, colTo).value
-
+    
+      ' =========================
+      ' # skip rows with missing dates
+      ' =========================
+      If IsEmpty(dFrom) Or IsEmpty(dTo) Then GoTo NextI
+    
       If Not dictMin.exists(grp) Then
         dictMin.Add grp, dFrom
         dictMax.Add grp, dTo
@@ -444,9 +449,10 @@ Sub RecalculateHeaders(tbl As ListObject)
         If dFrom < dictMin(grp) Then dictMin(grp) = dFrom
         If dTo > dictMax(grp) Then dictMax(grp) = dTo
       End If
-
+    
     End If
-
+    
+NextI:
   Next i
 
   For i = 1 To tbl.ListRows.count
