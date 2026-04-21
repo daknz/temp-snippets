@@ -53,6 +53,12 @@ End Function
 '==================================================
 Sub UpdateFast(ws As Worksheet, tbl As ListObject)
 
+  On Error GoTo CleanUp
+
+  Application.ScreenUpdating = False
+  Application.EnableEvents = False
+  Application.Calculation = xlCalculationManual
+
   Dim headerRow As Long
   headerRow = tbl.HeaderRowRange.row
 
@@ -120,10 +126,13 @@ Sub UpdateFast(ws As Worksheet, tbl As ListObject)
   ' # redraw affected rows
   ' =========================
   DrawRows ws, tbl, dict
-  DrawTodayBorder ws, tbl
+
+CleanUp:
+  Application.Calculation = xlCalculationAutomatic
+  Application.EnableEvents = True
+  Application.ScreenUpdating = True
 
 End Sub
-
 
 '==================================================
 ' # ADD HEADER ROWS TO REDRAW SET
@@ -180,13 +189,13 @@ Function GetDateMap(ws As Worksheet, tbl As ListObject) As Object
   Dim lastCol As Long
   lastCol = ws.Cells(headerRow, ws.Columns.count).End(xlToLeft).Column
 
-  Dim c As Long
+  Dim C As Long
 
-  For c = startCol To lastCol
-    If Not IsEmpty(ws.Cells(headerRow, c).value) Then
-      dict(ws.Cells(headerRow, c).value) = c
+  For C = startCol To lastCol
+    If Not IsEmpty(ws.Cells(headerRow, C).value) Then
+      dict(ws.Cells(headerRow, C).value) = C
     End If
-  Next c
+  Next C
 
   Set GetDateMap = dict
 
@@ -217,13 +226,13 @@ Sub DrawRows(ws As Worksheet, tbl As ListObject, dict As Object)
     Dim wsRow As Long
     wsRow = key
 
-    Dim c As Long
-
-    ' clear row
-    For c = timelineStartCol To lastCol
-      ws.Cells(wsRow, c).Interior.Pattern = xlNone
-      ws.Cells(wsRow, c).ClearContents
-    Next c
+    ' =========================
+    ' # clear row (batched)
+    ' =========================
+    With ws.Range(ws.Cells(wsRow, timelineStartCol), ws.Cells(wsRow, lastCol))
+      .Interior.Pattern = xlNone
+      .ClearContents
+    End With
 
     Dim iRow As Long
     iRow = key - tbl.DataBodyRange.row + 1
@@ -246,39 +255,30 @@ Sub DrawRows(ws As Worksheet, tbl As ListObject, dict As Object)
 
     Dim colStart As Long, colEnd As Long
     Dim hasFrom As Boolean, hasTo As Boolean
-    
+
     hasFrom = dateMap.exists(fromDate)
     hasTo = dateMap.exists(toDate)
-    
-    ' =========================
-    ' # no dates ? no bar
-    ' =========================
+
     If Not hasFrom And Not hasTo Then GoTo NextRow
-    
-    ' =========================
-    ' # one date ? single cell
-    ' =========================
+
     If hasFrom And Not hasTo Then
       colStart = dateMap(fromDate)
       colEnd = colStart
-    
+
     ElseIf Not hasFrom And hasTo Then
       colStart = dateMap(toDate)
       colEnd = colStart
-    
+
     Else
-      ' =========================
-      ' # both dates ? normal range
-      ' =========================
       colStart = dateMap(fromDate)
       colEnd = dateMap(toDate)
-    
       If colStart > colEnd Then GoTo NextRow
     End If
 
-    For c = colStart To colEnd
-      ws.Cells(wsRow, c).Interior.Color = fillColor
-    Next c
+    ' =========================
+    ' # fill (batched)
+    ' =========================
+    ws.Range(ws.Cells(wsRow, colStart), ws.Cells(wsRow, colEnd)).Interior.Color = fillColor
 
     If desc <> "" Then
       ws.Cells(wsRow, colStart).value = desc
@@ -291,16 +291,26 @@ NextRow:
 
 End Sub
 
-
 '==================================================
 ' # FULL MODE
 '==================================================
+
 Sub UpdateAll(ws As Worksheet, tbl As ListObject)
+
+  On Error GoTo CleanUp
+
+  Application.ScreenUpdating = False
+  Application.EnableEvents = False
+  Application.Calculation = xlCalculationManual
 
   UpdateFast ws, tbl
   DrawTimelineCells ws, tbl
-  DrawTodayBorder ws, tbl
-  
+
+CleanUp:
+  Application.Calculation = xlCalculationAutomatic
+  Application.EnableEvents = True
+  Application.ScreenUpdating = True
+
 End Sub
 
 
@@ -363,43 +373,42 @@ Sub DrawTimelineCells(ws As Worksheet, tbl As ListObject)
       fillColor = RGB(218, 242, 208)
     End If
 
-
     Dim colStart As Long, colEnd As Long
     Dim hasFrom As Boolean, hasTo As Boolean
-    
+
     hasFrom = dateMap.exists(fromDate)
     hasTo = dateMap.exists(toDate)
-    
+
     ' =========================
     ' # no dates ? no bar
     ' =========================
     If Not hasFrom And Not hasTo Then GoTo NextRow
-    
+
     ' =========================
     ' # one date ? single cell
     ' =========================
     If hasFrom And Not hasTo Then
       colStart = dateMap(fromDate)
       colEnd = colStart
-    
+
     ElseIf Not hasFrom And hasTo Then
       colStart = dateMap(toDate)
       colEnd = colStart
-    
+
     Else
       ' =========================
       ' # both dates ? normal range
       ' =========================
       colStart = dateMap(fromDate)
       colEnd = dateMap(toDate)
-    
+
       If colStart > colEnd Then GoTo NextRow
     End If
 
-    Dim c As Long
-    For c = colStart To colEnd
-      ws.Cells(wsRow, c).Interior.Color = fillColor
-    Next c
+    ' =========================
+    ' # fill (batched)
+    ' =========================
+    ws.Range(ws.Cells(wsRow, colStart), ws.Cells(wsRow, colEnd)).Interior.Color = fillColor
 
     ws.Cells(wsRow, colStart).value = desc
 
@@ -407,7 +416,6 @@ NextRow:
   Next i
 
 End Sub
-
 
 '==================================================
 ' # HEADER CALC
@@ -493,47 +501,19 @@ Function GetTodayColumn(ws As Worksheet, tbl As ListObject) As Long
     targetDate = targetDate + (8 - Weekday(targetDate, vbMonday))
   End If
 
-  Dim c As Long
-  For c = startCol To lastCol
-    If ws.Cells(headerRow, c).value = targetDate Then
-      GetTodayColumn = c
+  Dim C As Long
+  For C = startCol To lastCol
+    If ws.Cells(headerRow, C).value = targetDate Then
+      GetTodayColumn = C
       Exit Function
     End If
-  Next c
+  Next C
 
 End Function
 
-Sub DrawTodayBorder(ws As Worksheet, tbl As ListObject)
 
-  Dim headerRow As Long
-  headerRow = tbl.HeaderRowRange.row
+'# SETUP NOTES --------------------------------------------------
+'Went to Windows Settings > Display Settings > Graphics
+'Add desktop app > C:\Program Files\Microsoft Office\root\Office16\ > Excel.EXE
+'Changed GPU preference to Power Saving
 
-  Dim startCol As Long
-  startCol = tbl.Range.Column + tbl.Range.Columns.count + 1
-
-  Dim lastCol As Long
-  lastCol = ws.Cells(headerRow, ws.Columns.count).End(xlToLeft).Column
-
-  Dim rng As Range
-  Set rng = ws.Range(ws.Cells(headerRow, startCol), ws.Cells(headerRow, lastCol))
-
-  ' =========================
-  ' # clear TOP border only
-  ' =========================
-  rng.Borders(xlEdgeTop).LineStyle = xlNone
-
-  ' =========================
-  ' # find today (or Monday)
-  ' =========================
-  Dim colToday As Long
-  colToday = GetTodayColumn(ws, tbl)
-
-  If colToday = 0 Then Exit Sub
-
-  With ws.Cells(headerRow, colToday).Borders(xlEdgeTop)
-    .LineStyle = xlContinuous
-    .Weight = xlThick
-    .Color = RGB(255, 0, 0)
-  End With
-
-End Sub
